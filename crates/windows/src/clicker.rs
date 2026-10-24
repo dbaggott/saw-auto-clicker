@@ -23,6 +23,7 @@ use crate::throttling;
 pub struct Clicker {
     scheduler: SchedulerHandle,
     hook: HookThread,
+    throttling: ThrottlingOptOuts,
 }
 
 impl Clicker {
@@ -35,7 +36,7 @@ impl Clicker {
         on_status: impl FnMut(Status) + Send + 'static,
         on_observed: impl FnMut(ButtonEvent, Verdict) + Send + 'static,
     ) -> io::Result<Clicker> {
-        throttling::opt_out(throttling)?;
+        let throttling = throttling::opt_out(throttling);
         let mut hook = HookThread::spawn()?;
         let backend = Backend {
             reinstaller: hook.reinstaller(),
@@ -53,7 +54,17 @@ impl Clicker {
             let _ = scheduler.shutdown();
             return Err(e);
         }
-        Ok(Clicker { scheduler, hook })
+        Ok(Clicker {
+            scheduler,
+            hook,
+            throttling,
+        })
+    }
+
+    /// The throttling opt-outs Windows accepted, which can be fewer than
+    /// were asked for on a Windows version that lacks a mechanism.
+    pub fn throttling_opt_outs(&self) -> ThrottlingOptOuts {
+        self.throttling
     }
 
     pub fn controller(&self) -> Controller {

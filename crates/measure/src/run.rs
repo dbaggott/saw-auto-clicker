@@ -5,58 +5,70 @@ use std::fs::File;
 use std::io::{self, BufWriter, Write};
 use std::path::Path;
 use std::sync::OnceLock;
-use std::sync::mpsc::{self, SyncSender};
+use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use saw_core::{Direction, Hotkey, Settings, Source, Status, Verdict};
+use saw_core::{Button, Direction, Hotkey, Settings, Source, Status, Verdict};
 use saw_windows::{Clicker, ThrottlingOptOuts};
-use windows::Win32::System::Console::SetConsoleCtrlHandler;
+use windows::Win32::System::Console::{CTRL_BREAK_EVENT, CTRL_C_EVENT, SetConsoleCtrlHandler};
 use windows::core::BOOL;
 
 use crate::log::{Kind, Record, RunInfo};
 
-static CTRL_C: OnceLock<SyncSender<()>> = OnceLock::new();
+/// What the main thread waits for while the clicker runs.
+enum Event {
+    Stop,
+    NotInjectable(Button),
+}
 
-unsafe extern "system" fn on_ctrl(_ctrl_type: u32) -> BOOL {
-    if let Some(stop) = CTRL_C.get() {
-        let _ = stop.try_send(());
+static EVENTS: OnceLock<mpsc::Sender<Event>> = OnceLock::new();
+
+unsafe extern "system" fn on_ctrl(ctrl_type: u32) -> BOOL {
+    if ctrl_type != CTRL_C_EVENT && ctrl_type != CTRL_BREAK_EVENT {
+        // Closing the console, logoff and shutdown end the process as soon as
+        // a handler returns, so there is no clean shutdown to start.
+        return BOOL::from(false);
+    }
+    if let Some(events) = EVENTS.get() {
+        let _ = events.send(Event::Stop);
     }
     // Handled: the main thread shuts down cleanly instead of the process
     // being ended mid-burst.
     BOOL::from(true)
 }
 
-pub fn run(info: RunInfo, log_path: &Path) -> Result<(), String> {
+pub fn run(requested: RunInfo, log_path: &Path) -> Result<(), String> {
     let settings = Settings::new(
-        info.cps,
-        Duration::from_millis(info.delay_ms),
-        f64::from(info.jitter_percent) / 100.0,
+        requested.cps,
+        Duration::from_millis(requested.delay_ms),
+        f64::from(requested.jitter_percent) / 100.0,
         Hotkey::default(),
     )
     .map_err(|e| e.to_string())?;
     let file =
         File::create(log_path).map_err(|e| format!("cannot create {}: {e}", log_path.display()))?;
 
-    let (stop_tx, stop) = mpsc::sync_channel(1);
-    CTRL_C
-        .set(stop_tx)
+    let (events_tx, events) = mpsc::channel();
+    EVENTS
+        .set(events_tx.clone())
         .map_err(|_| "run started twice".to_string())?;
     unsafe { SetConsoleCtrlHandler(Some(on_ctrl), true) }
         .map_err(|e| format!("cannot catch Ctrl+C: {e}"))?;
 
     let start = Instant::now();
     let (records, incoming) = mpsc::channel::<Record>();
-    let writer = thread::spawn(move || write_log(file, info, incoming));
     let clicker = Clicker::start(
         settings,
         ThrottlingOptOuts {
-            execution_speed: info.execution_speed_opt_out,
-            timer_resolution: info.timer_resolution_opt_out,
+            execution_speed: requested.execution_speed_opt_out,
+            timer_resolution: requested.timer_resolution_opt_out,
         },
-        |status| {
+        // Runs on the scheduler thread, which must not wait on the console:
+        // a QuickEdit selection there blocks console writes.
+        move |status| {
             if let Status::TargetNotInjectable(button) = status {
-                eprintln!("{button:?}: the window under the cursor can't be clicked into");
+                let _ = events_tx.send(Event::NotInjectable(button));
             }
         },
         move |event, verdict| {
@@ -76,20 +88,36 @@ pub fn run(info: RunInfo, log_path: &Path) -> Result<(), String> {
         },
     )
     .map_err(|e| format!("cannot start: {e}"))?;
+    let applied = clicker.throttling_opt_outs();
+    let info = RunInfo {
+        execution_speed_opt_out: applied.execution_speed,
+        timer_resolution_opt_out: applied.timer_resolution,
+        ..requested
+    };
+    if info != requested {
+        eprintln!("Windows refused a throttling opt-out; the log header records what applied.");
+    }
+    let writer = thread::spawn(move || write_log(file, info, incoming));
     clicker.controller().set_armed(true);
     println!(
         "Armed at {} CPS. Hold a mouse button to click; Ctrl+C stops and prints the summary.",
         info.cps
     );
 
-    let _ = stop.recv();
-    clicker
-        .shutdown()
-        .map_err(|_| "the scheduler thread panicked".to_string())?;
+    for event in &events {
+        match event {
+            Event::Stop => break,
+            Event::NotInjectable(button) => {
+                eprintln!("{button:?}: the window under the cursor can't be clicked into");
+            }
+        }
+    }
+    let stopped = clicker.shutdown();
     // The hook thread has exited, dropping the tap and with it the last
-    // sender, so the writer finishes.
-    writer
-        .join()
+    // record sender, so the writer finishes either way.
+    let written = writer.join();
+    stopped.map_err(|_| "the scheduler thread panicked".to_string())?;
+    written
         .map_err(|_| "the log writer panicked".to_string())?
         .map_err(|e| format!("writing {}: {e}", log_path.display()))?;
     println!("Log written to {}.", log_path.display());

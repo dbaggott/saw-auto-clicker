@@ -3,7 +3,7 @@
 //! thread-posted `WM_HOTKEY` messages.
 
 use std::io;
-use std::sync::mpsc;
+use std::sync::{Arc, Mutex, PoisonError, mpsc};
 use std::thread::{self, JoinHandle};
 
 use saw_core::{Controller, Hotkey, HotkeyError, Key, RegisterHotkey};
@@ -22,12 +22,16 @@ const WM_STOP: u32 = WM_APP + 1;
 
 type Reply = mpsc::SyncSender<Result<(), HotkeyError>>;
 
+/// The request `register` hands the thread. One slot is enough, because
+/// `register` takes `&mut self` and waits for its answer.
+type Pending = Arc<Mutex<Option<(Hotkey, Reply)>>>;
+
 /// Owns the hotkey thread, where each press toggles armed. Registration runs
 /// on that thread, because `RegisterHotKey` without a window posts to the
 /// thread that called it. Dropping this unregisters the hotkey.
 pub struct HotkeyThread {
     thread_id: u32,
-    requests: mpsc::Sender<(Hotkey, Reply)>,
+    pending: Pending,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -35,7 +39,8 @@ impl HotkeyThread {
     /// Starts with no hotkey registered.
     pub fn spawn(controller: Controller) -> io::Result<HotkeyThread> {
         let (id_tx, id_rx) = mpsc::sync_channel(1);
-        let (requests, incoming) = mpsc::channel::<(Hotkey, Reply)>();
+        let pending = Pending::default();
+        let incoming = Arc::clone(&pending);
         let thread = thread::Builder::new()
             .name("saw-hotkey".into())
             .spawn(move || {
@@ -57,7 +62,7 @@ impl HotkeyThread {
                             controller.toggle_armed();
                         }
                         WM_REQUEST => {
-                            for (hotkey, reply) in incoming.try_iter() {
+                            if let Some((hotkey, reply)) = take(&incoming) {
                                 let _ = reply.send(slot.change(hotkey));
                             }
                         }
@@ -71,7 +76,7 @@ impl HotkeyThread {
             .map_err(|_| io::Error::other("the hotkey thread exited before starting"))?;
         Ok(HotkeyThread {
             thread_id,
-            requests,
+            pending,
             thread: Some(thread),
         })
     }
@@ -81,9 +86,15 @@ impl RegisterHotkey for HotkeyThread {
     fn register(&mut self, hotkey: Hotkey) -> Result<(), HotkeyError> {
         let gone = || HotkeyError::Failed("the hotkey thread has exited".into());
         let (reply, answer) = mpsc::sync_channel(1);
-        self.requests.send((hotkey, reply)).map_err(|_| gone())?;
-        unsafe { PostThreadMessageW(self.thread_id, WM_REQUEST, WPARAM(0), LPARAM(0)) }
-            .map_err(|e| HotkeyError::Failed(e.message()))?;
+        *self.pending.lock().unwrap_or_else(PoisonError::into_inner) = Some((hotkey, reply));
+        if let Err(e) =
+            unsafe { PostThreadMessageW(self.thread_id, WM_REQUEST, WPARAM(0), LPARAM(0)) }
+        {
+            // Not posted, so the thread never takes it; withdraw it so a later
+            // request doesn't carry it out.
+            take(&self.pending);
+            return Err(HotkeyError::Failed(e.message()));
+        }
         answer.recv().map_err(|_| gone())?
     }
 }
@@ -97,6 +108,15 @@ impl Drop for HotkeyThread {
             let _ = thread.join();
         }
     }
+}
+
+fn take(pending: &Pending) -> Option<(Hotkey, Reply)> {
+    // The slot is a plain Option, so a panic elsewhere can't leave it
+    // inconsistent.
+    pending
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .take()
 }
 
 /// `RegisterHotKey` with no window, for the calling thread.

@@ -106,7 +106,12 @@ impl FromStr for RunInfo {
                 _ => Err(bad()),
             };
             match key {
-                "cps" => info.cps = value.parse().map_err(|_| bad())?,
+                "cps" => {
+                    info.cps = value.parse().map_err(|_| bad())?;
+                    if info.cps == 0 {
+                        return Err(bad());
+                    }
+                }
                 "jitter" => info.jitter_percent = value.parse().map_err(|_| bad())?,
                 "delay_ms" => info.delay_ms = value.parse().map_err(|_| bad())?,
                 "execution_speed_opt_out" => info.execution_speed_opt_out = flag()?,
@@ -130,12 +135,16 @@ impl FromStr for RunInfo {
     }
 }
 
+pub fn button_name(button: Button) -> &'static str {
+    match button {
+        Button::Left => "left",
+        Button::Right => "right",
+    }
+}
+
 impl fmt::Display for Record {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let button = match self.button {
-            Button::Left => "left",
-            Button::Right => "right",
-        };
+        let button = button_name(self.button);
         let kind = match self.kind {
             Kind::Press => "press",
             Kind::Release => "release",
@@ -188,9 +197,18 @@ impl FromStr for Log {
         let info = header
             .parse()
             .map_err(|reason| ParseError { line, reason })?;
-        let records = lines
-            .map(|(line, text)| text.parse().map_err(|reason| ParseError { line, reason }))
-            .collect::<Result<_, _>>()?;
+        let mut records: Vec<Record> = Vec::new();
+        for (line, text) in lines {
+            let record: Record = text.parse().map_err(|reason| ParseError { line, reason })?;
+            // Summaries subtract earlier times from later ones.
+            if records.last().is_some_and(|last| record.at_us < last.at_us) {
+                return Err(ParseError {
+                    line,
+                    reason: "time goes backwards".into(),
+                });
+            }
+            records.push(record);
+        }
         Ok(Log { info, records })
     }
 }
@@ -267,6 +285,24 @@ mod tests {
             .parse::<RunInfo>()
             .unwrap_err();
         assert!(err.contains("timer_resolution_opt_out"), "{err}");
+    }
+
+    #[test]
+    fn times_must_not_go_backwards() {
+        let text = format!("{}\n20 left press\n10 left release\n", info());
+        assert_eq!(
+            text.parse::<Log>().unwrap_err(),
+            ParseError {
+                line: 3,
+                reason: "time goes backwards".into()
+            }
+        );
+    }
+
+    #[test]
+    fn a_zero_target_rate_is_rejected() {
+        let header = "# saw-measure cps=0 jitter=0 delay_ms=250 execution_speed_opt_out=on timer_resolution_opt_out=on";
+        assert!(header.parse::<RunInfo>().is_err());
     }
 
     #[test]

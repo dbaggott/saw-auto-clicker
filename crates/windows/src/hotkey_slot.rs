@@ -15,17 +15,18 @@ pub(crate) trait HotkeyTable {
 pub(crate) struct HotkeySlot<T> {
     table: T,
     current: Option<(i32, Hotkey)>,
+    last_id: i32,
 }
 
-/// The new registration needs an id the old one isn't using, because both are
-/// registered for a moment; alternating between two ids is enough.
-const IDS: [i32; 2] = [1, 2];
+/// The ids an application may give its hotkeys.
+const MAX_ID: i32 = 0xBFFF;
 
 impl<T: HotkeyTable> HotkeySlot<T> {
     pub(crate) fn new(table: T) -> HotkeySlot<T> {
         HotkeySlot {
             table,
             current: None,
+            last_id: 0,
         }
     }
 
@@ -35,14 +36,16 @@ impl<T: HotkeyTable> HotkeySlot<T> {
     }
 
     pub(crate) fn change(&mut self, hotkey: Hotkey) -> Result<(), HotkeyError> {
-        let id = match self.current {
-            // Registering a combination this slot already holds would fail as
-            // taken, by itself.
-            Some((_, current)) if current == hotkey => return Ok(()),
-            Some((id, _)) if id == IDS[0] => IDS[1],
-            _ => IDS[0],
-        };
+        // Registering a combination this slot already holds would fail as
+        // taken, by itself.
+        if self.current.is_some_and(|(_, current)| current == hotkey) {
+            return Ok(());
+        }
+        // A fresh id each time, so a press of a replaced hotkey still queued
+        // as `WM_HOTKEY` never matches the current one.
+        let id = self.last_id % MAX_ID + 1;
         self.table.register(id, hotkey)?;
+        self.last_id = id;
         if let Some((old, _)) = self.current.replace((id, hotkey)) {
             self.table.unregister(old);
         }
@@ -137,7 +140,6 @@ mod tests {
             "{:?}",
             slot.table.calls
         );
-        // The next change still finds a free id.
         slot.change(ctrl_alt(Key::F10)).unwrap();
         assert_eq!(slot.table.ours, HashMap::from([(2, ctrl_alt(Key::F10))]));
     }
@@ -150,6 +152,24 @@ mod tests {
         });
         assert_eq!(slot.change(ctrl_alt(Key::F8)), Err(HotkeyError::Taken));
         assert!(!slot.is_current(1) && !slot.is_current(2));
+    }
+
+    #[test]
+    fn a_replaced_hotkeys_id_is_not_reused_by_the_next_change() {
+        let mut slot = HotkeySlot::new(FakeTable::default());
+        for key in [Key::F8, Key::F9, Key::F10] {
+            slot.change(ctrl_alt(key)).unwrap();
+        }
+        assert!(slot.is_current(3));
+        assert!(!slot.is_current(1) && !slot.is_current(2));
+    }
+
+    #[test]
+    fn ids_wrap_within_the_application_range() {
+        let mut slot = HotkeySlot::new(FakeTable::default());
+        slot.last_id = MAX_ID;
+        slot.change(ctrl_alt(Key::F8)).unwrap();
+        assert!(slot.is_current(1));
     }
 
     #[test]

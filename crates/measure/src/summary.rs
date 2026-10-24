@@ -5,7 +5,7 @@ use std::fmt;
 
 use saw_core::Button;
 
-use crate::log::{Kind, Log, on_off};
+use crate::log::{Kind, Log, button_name, on_off};
 
 /// One press-to-release of one button.
 #[derive(Clone, Debug, PartialEq)]
@@ -49,11 +49,13 @@ impl Hold {
             max_ms: gaps.iter().copied().fold(f64::NEG_INFINITY, f64::max),
         })
     }
+}
 
+impl Intervals {
     /// Clicks per second from the first click to the last, so the activation
     /// delay before the burst doesn't dilute it.
-    pub fn mean_rate(&self) -> Option<f64> {
-        self.intervals().map(|i| 1000.0 / i.mean_ms)
+    pub fn mean_rate(&self) -> f64 {
+        1000.0 / self.mean_ms
     }
 }
 
@@ -118,17 +120,15 @@ impl fmt::Display for Report<'_> {
             return writeln!(f, "no holds recorded");
         }
         for (n, hold) in holds.iter().enumerate() {
-            let button = match hold.button {
-                Button::Left => "left",
-                Button::Right => "right",
-            };
+            let button = button_name(hold.button);
             let held = match hold.released_us {
                 Some(released) => format!("{:.2} s", (released - hold.pressed_us) as f64 / 1e6),
                 None => "unreleased".into(),
             };
             write!(f, "hold {} ({button}, {held}): ", n + 1)?;
-            match (hold.mean_rate(), hold.intervals()) {
-                (Some(rate), Some(i)) => {
+            match hold.intervals() {
+                Some(i) => {
+                    let rate = i.mean_rate();
                     let error = (rate / f64::from(info.cps) - 1.0) * 100.0;
                     writeln!(
                         f,
@@ -140,7 +140,7 @@ impl fmt::Display for Report<'_> {
                         i.max_ms
                     )?;
                 }
-                _ => writeln!(f, "{} clicks, too few for a rate", hold.clicks.len())?,
+                None => writeln!(f, "{} clicks, too few for a rate", hold.clicks.len())?,
             }
         }
         Ok(())
@@ -183,8 +183,8 @@ mod tests {
         records.push((700_000, Left, Release));
         let holds = holds(&log(&records));
         assert_eq!(holds.len(), 1);
-        assert_eq!(holds[0].mean_rate(), Some(10.0));
         let i = holds[0].intervals().unwrap();
+        assert_eq!(i.mean_rate(), 10.0);
         assert_eq!((i.count, i.mean_ms, i.sd_ms), (3, 100.0, 0.0));
     }
 
@@ -223,7 +223,7 @@ mod tests {
             (holds[1].button, holds[1].clicks.clone()),
             (Right, vec![30])
         );
-        assert_eq!(holds[1].mean_rate(), None);
+        assert_eq!(holds[1].intervals(), None);
     }
 
     #[test]

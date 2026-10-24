@@ -21,7 +21,7 @@ use crate::tag::source_of;
 /// Runs on the hook thread with each left or right event and the verdict it
 /// got, after the gate has decided. It runs inside the hook callback, so it
 /// must return as promptly as the gate does (C1).
-pub type ObservedTap = Box<dyn FnMut(ButtonEvent, Verdict) + Send>;
+pub(crate) type ObservedTap = Box<dyn FnMut(ButtonEvent, Verdict) + Send>;
 
 const WM_REINSTALL: u32 = WM_APP;
 const WM_STOP: u32 = WM_APP + 1;
