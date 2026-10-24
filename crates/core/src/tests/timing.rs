@@ -210,3 +210,49 @@ fn reinstall_every_60_s_while_armed_and_idle() {
     sim.run_until(at_ms(300_000));
     assert_eq!(sim.reinstalls(), [at_ms(0), at_ms(61_000), at_ms(121_000)]);
 }
+
+#[test]
+fn a_late_down_is_never_followed_by_a_down_hold_under_the_floor() {
+    // At 50 CPS click k's up is at 250 + 20k − 8 ms and its down 8 ms later.
+    let mut sim = Sim::armed(settings(50, 250, 0.0));
+    sim.press(LEFT, at_ms(0));
+    // Injection 2 is the up at 282 ms; it echoes at 301 ms, so its down goes
+    // out then, 1 ms before the next up's 302 ms deadline. That cycle is
+    // dropped and the next up is at 322 ms.
+    sim.slow_echo(2, ms(19));
+    sim.release(LEFT, at_ms(335));
+    sim.run_until(at_ms(1_000));
+    use Direction::{Down, Up};
+    assert_eq!(
+        injected(&sim),
+        [
+            (at_ms(262), Up),
+            (at_ms(270), Down),
+            (at_ms(282), Up),
+            (at_ms(301), Down),
+            (at_ms(322), Up),
+            (at_ms(330), Down),
+        ]
+    );
+}
+
+#[test]
+fn a_held_button_does_not_stop_the_idle_reinstall() {
+    let mut sim = Sim::armed(settings(10, 250, 0.0));
+    // Refused at the delay, so held with no burst, and the release is never
+    // seen.
+    sim.set_injectable_at(at_ms(0), false);
+    sim.press(LEFT, at_ms(10));
+    sim.run_until(at_ms(130_000));
+    assert_eq!(sim.reinstalls(), [at_ms(0), at_ms(60_000), at_ms(120_000)]);
+}
+
+#[test]
+fn arming_during_shutdown_is_ignored() {
+    let mut sim = Sim::new(settings(10, 250, 0.0));
+    sim.control_at(at_ms(0), Input::Shutdown);
+    sim.control_at(at_ms(0), Input::ToggleArmed);
+    sim.run_until(at_ms(1_000));
+    assert!(sim.reinstalls().is_empty());
+    assert!(sim.statuses().is_empty());
+}

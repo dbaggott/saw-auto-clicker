@@ -96,10 +96,6 @@ impl ButtonGate {
     /// without blocking, and returns the verdict for the backend to apply.
     pub fn observe(&mut self, event: ButtonEvent) -> Verdict {
         let state = &mut self.buttons[event.button.index()];
-        let to_delivered = match event.direction {
-            Direction::Down => Delivered::Down,
-            Direction::Up => Delivered::Up,
-        };
         let verdict = match (event.source, event.direction) {
             (Source::Physical, Direction::Down) => {
                 state.released = false;
@@ -119,7 +115,10 @@ impl ButtonGate {
                 if state.released {
                     Verdict::Suppress
                 } else {
-                    state.delivered = to_delivered;
+                    state.delivered = match event.direction {
+                        Direction::Down => Delivered::Down,
+                        Direction::Up => Delivered::Up,
+                    };
                     Verdict::Pass
                 }
             }

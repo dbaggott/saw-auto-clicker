@@ -141,14 +141,31 @@ fn quit_mid_burst_with_the_button_delivered_down() {
 }
 
 #[test]
-fn quit_while_an_up_is_in_flight() {
+fn quit_while_an_up_is_in_flight_sends_the_down_on_its_echo() {
     let mut sim = holding_left();
     sim.set_echo_latency(ms(4));
     sim.control_at(at_ms(312), Input::Shutdown);
     sim.release(LEFT, at_ms(800));
     sim.run_until(at_ms(2_000));
-    sim.assert_ends_cleanly(LEFT, at_ms(312));
-    assert_eq!(sim.exited_at(), Some(at_ms(316)));
+    let last = sim.injections(LEFT).last().copied().unwrap();
+    assert_eq!((last.at, last.direction), (at_ms(314), Direction::Down));
+    assert_eq!(sim.exited_at(), Some(at_ms(318)));
+    sim.assert_ends_cleanly(LEFT, at_ms(800));
+}
+
+#[test]
+fn quit_with_an_up_unechoed_injects_no_down() {
+    let mut sim = holding_left();
+    sim.set_echo_latency(ms(4));
+    // The up injected at 310 ms never echoes, and the release is lost too.
+    sim.kill_observation_at(at_ms(311));
+    sim.control_at(at_ms(312), Input::Shutdown);
+    sim.release(LEFT, at_ms(320));
+    sim.run_until(at_ms(2_000));
+    assert_eq!(sim.exited_at(), Some(at_ms(412)));
+    assert!(sim.injections(LEFT).iter().all(|i| i.at <= at_ms(310)));
+    // The dead observation let the release through after the up.
+    sim.assert_ends_with_at_most_one_redundant_up(LEFT, at_ms(310));
 }
 
 #[test]

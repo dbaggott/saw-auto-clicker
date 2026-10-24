@@ -6,7 +6,7 @@ use fastrand::Rng;
 use crate::backend::{Inject, Observe};
 use crate::clock::{Clock, Time};
 use crate::gate::{Button, ButtonEvent, Direction, Source};
-use crate::jitter::{Cycle, Grid};
+use crate::jitter::{Cycle, Grid, MIN_PHASE};
 use crate::settings::Settings;
 
 /// The floor on how long an injection may go unechoed before the observation
@@ -48,15 +48,20 @@ pub(crate) enum Wake {
 enum Track {
     /// Not held, as far as the scheduler knows.
     Idle,
-    /// Held, waiting out the activation delay.
+    /// Held, waiting out the activation delay, with the settings in force at
+    /// the press.
     Pending {
         delay_ends: Time,
+        settings: Settings,
     },
     /// Held with no burst running, until the physical up.
     Held,
     Burst(Burst),
-    /// Shutting down, waiting for a final tagged down to echo.
-    Closing,
+    /// Shutting down. Waits for an up still in flight to echo before
+    /// injecting the final down, then for that down to echo.
+    Closing {
+        awaiting: Direction,
+    },
 }
 
 struct Burst {
@@ -95,15 +100,17 @@ impl Burst {
     }
 
     fn echoed(&mut self, direction: Direction, now: Time) {
-        if self.in_flight.map(|f| f.direction) != Some(direction) {
+        let Some(echoed) = self.in_flight.filter(|f| f.direction == direction) else {
             return;
-        }
+        };
         self.in_flight = None;
         if direction == Direction::Down {
             // An up whose deadline passed while this down was unechoed is
-            // dropped with its whole cycle, not caught up (D8).
+            // dropped with its whole cycle, not caught up (D8). So is one that
+            // would follow a late down by less than D5's floor.
+            let earliest_up = now.max(echoed.sent + MIN_PHASE);
             self.cycle = self.grid.next_cycle();
-            while self.cycle.up < now {
+            while self.cycle.up < earliest_up {
                 self.cycle = self.grid.next_cycle();
             }
         }
@@ -186,32 +193,43 @@ impl<B: Observe + Inject> Scheduler<B> {
                 if self.quit_by.is_none() {
                     *track = Track::Pending {
                         delay_ends: now + self.settings.activation_delay(),
+                        settings: self.settings.clone(),
                     };
                 }
             }
             (Source::Physical, Direction::Up) => *track = Track::Idle,
             (Source::Tagged, direction) => match track {
                 Track::Burst(burst) => burst.echoed(direction, now),
-                Track::Closing if direction == Direction::Down => *track = Track::Idle,
+                Track::Closing { awaiting } if *awaiting == direction => {
+                    if direction == Direction::Up {
+                        self.backend.inject(event.button, Direction::Down);
+                        *awaiting = Direction::Down;
+                    } else {
+                        *track = Track::Idle;
+                    }
+                }
                 _ => {}
             },
         }
     }
 
     fn set_armed(&mut self, armed: bool, now: Time) {
-        if armed == self.armed {
+        if armed == self.armed || self.quit_by.is_some() {
             return;
         }
         self.armed = armed;
+        // A press that spans the change starts no burst. Disarming stops
+        // bursts at once (R2); arming leaves a press already held alone,
+        // because the reinstall below could lose its release.
+        for track in &mut self.tracks {
+            if matches!(track, Track::Burst(_) | Track::Pending { .. }) {
+                *track = Track::Held;
+            }
+        }
         if armed {
             self.reinstall(now);
             (self.on_status)(Status::Armed);
         } else {
-            for track in &mut self.tracks {
-                if let Track::Burst(_) = track {
-                    *track = Track::Held;
-                }
-            }
             (self.on_status)(Status::Disarmed);
         }
     }
@@ -225,27 +243,33 @@ impl<B: Observe + Inject> Scheduler<B> {
         self.quit_by = Some(now + QUIT_GRACE);
         for button in Button::ALL {
             let track = &mut self.tracks[button.index()];
-            *track = match track {
-                Track::Burst(burst) if burst.next == Direction::Down => {
-                    // The last injection was an up. Whether or not it has
-                    // echoed, it reaches the gate ahead of this down.
-                    self.backend.inject(button, Direction::Down);
-                    Track::Closing
-                }
-                Track::Burst(Burst {
-                    in_flight: Some(_), ..
-                }) => Track::Closing,
-                Track::Burst(_) | Track::Pending { .. } => Track::Held,
-                Track::Idle => Track::Idle,
-                Track::Held => Track::Held,
-                Track::Closing => Track::Closing,
+            let closing = match track {
+                Track::Burst(burst) => match (burst.in_flight, burst.next) {
+                    // Lockstep holds here too: the down waits for the up's
+                    // echo, so a dead observation gets no down it can't close.
+                    (Some(f), _) => Some(f.direction),
+                    (None, Direction::Down) => {
+                        self.backend.inject(button, Direction::Down);
+                        Some(Direction::Down)
+                    }
+                    (None, Direction::Up) => None,
+                },
+                _ => None,
             };
+            if let Some(awaiting) = closing {
+                *track = Track::Closing { awaiting };
+            } else if matches!(track, Track::Burst(_) | Track::Pending { .. }) {
+                *track = Track::Held;
+            }
         }
     }
 
     fn poll(&mut self, now: Time) -> Wake {
         if let Some(quit_by) = self.quit_by {
-            let closing = self.tracks.iter().any(|t| matches!(t, Track::Closing));
+            let closing = self
+                .tracks
+                .iter()
+                .any(|t| matches!(t, Track::Closing { .. }));
             return if closing && now < quit_by {
                 Wake::At(quit_by)
             } else {
@@ -263,7 +287,13 @@ impl<B: Observe + Inject> Scheduler<B> {
         for button in Button::ALL {
             wake = earliest(wake, self.poll_track(button, now));
         }
-        if self.armed && self.tracks.iter().all(|t| matches!(t, Track::Idle)) {
+        // Held counts as idle: its release may have been lost to a dead
+        // observation, and only a reinstall would recover from that.
+        let idle = self
+            .tracks
+            .iter()
+            .all(|t| matches!(t, Track::Idle | Track::Held));
+        if self.armed && idle {
             if now >= self.last_reinstall + IDLE_REINSTALL_PERIOD {
                 self.reinstall(now);
             }
@@ -277,8 +307,11 @@ impl<B: Observe + Inject> Scheduler<B> {
     fn poll_track(&mut self, button: Button, now: Time) -> Option<Time> {
         let track = &mut self.tracks[button.index()];
         match track {
-            Track::Idle | Track::Held | Track::Closing => None,
-            Track::Pending { delay_ends } => {
+            Track::Idle | Track::Held | Track::Closing { .. } => None,
+            Track::Pending {
+                delay_ends,
+                settings,
+            } => {
                 let start = *delay_ends;
                 if now < start {
                     return Some(start);
@@ -292,7 +325,7 @@ impl<B: Observe + Inject> Scheduler<B> {
                     (self.on_status)(Status::TargetNotInjectable(button));
                     return None;
                 }
-                *track = Track::Burst(Burst::new(start, &self.settings, self.rng.fork()));
+                *track = Track::Burst(Burst::new(start, settings, self.rng.fork()));
                 self.poll_track(button, now)
             }
             Track::Burst(burst) => {

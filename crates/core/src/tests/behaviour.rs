@@ -176,3 +176,33 @@ fn changed_settings_apply_from_the_next_press() {
     // The second burst's down due at 1 300 ms meets the release there.
     assert_eq!(downs, [350, 450, 550, 650, 1_150, 1_200, 1_250].map(at_ms));
 }
+
+#[test]
+fn settings_changed_during_the_delay_wait_for_the_next_press() {
+    let mut sim = Sim::armed(settings(10, 250, 0.0));
+    sim.press(LEFT, at_ms(0));
+    sim.control_at(at_ms(100), Input::SetSettings(settings(20, 100, 0.0)));
+    sim.release(LEFT, at_ms(560));
+    sim.run_until(at_ms(2_000));
+    let downs: Vec<Time> = sim
+        .injections(LEFT)
+        .into_iter()
+        .filter(|i| i.direction == Direction::Down)
+        .map(|i| i.at)
+        .collect();
+    assert_eq!(downs, [350, 450, 550].map(at_ms));
+}
+
+#[test]
+fn a_press_held_across_arming_starts_no_burst() {
+    let mut sim = Sim::new(settings(10, 250, 0.0));
+    sim.press(LEFT, at_ms(0));
+    sim.control_at(at_ms(100), Input::SetArmed(true));
+    sim.release(LEFT, at_ms(1_000));
+    sim.run_until(at_ms(2_000));
+    assert!(sim.injections(LEFT).is_empty());
+    assert_eq!(
+        physical(&sim, LEFT),
+        [(at_ms(0), Direction::Down), (at_ms(1_000), Direction::Up)]
+    );
+}
