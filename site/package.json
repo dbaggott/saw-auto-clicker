@@ -6,7 +6,7 @@
   "description": "saw-auto-clicker's joke download page, served at shadyazzwebsite.dnbg.app",
   "scripts": {
     "dev": "eleventy --serve",
-    "build": "rm -rf dist && eleventy",
+    "build": "node -e \"fs.rmSync('dist', { recursive: true, force: true })\" && eleventy",
     "test": "node --test test/*.test.mjs"
   },
   "devDependencies": {

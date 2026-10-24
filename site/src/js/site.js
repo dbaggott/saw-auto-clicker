@@ -40,7 +40,9 @@ document.querySelector("[data-unlock]")?.addEventListener("click", () => {
 
 for (const button of document.querySelectorAll("[data-sold-out]")) {
   button.addEventListener("click", () => {
+    const soldOut = button.nextElementSibling;
     button.hidden = true;
-    button.nextElementSibling.hidden = false;
+    soldOut.hidden = false;
+    soldOut.focus();
   });
 }
