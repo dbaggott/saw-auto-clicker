@@ -6,3 +6,6 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 publish = false
+
+[dependencies]
+fastrand = "2.5.0"
