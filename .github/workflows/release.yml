@@ -1,0 +1,94 @@
+name: Release
+
+# Pushing a `v*` tag builds both binaries for x64 and arm64, smoke-checks the
+# x64 build, and publishes a GitHub release for the tag with all four
+# attached. A tag with a hyphen, such as v0.0.1-rc.1, is a pre-release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    with:
+      version: ${{ github.ref_name }}
+
+  # Runs the exact bytes the release will carry. Bash, because it waits for
+  # any child and reports its exit code; PowerShell skips the wait for a
+  # GUI-subsystem program unless its output is piped.
+  smoke-x64:
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: saw-x86_64-pc-windows-msvc
+      # The runner's bash runs with -e, so each exit code is read with `||`.
+      - name: saw-app --version exits 0
+        run: |
+          status=0
+          out=$(./saw-app.exe --version) || status=$?
+          echo "exit code $status, stdout: $out"
+          test "$status" -eq 0
+      - name: saw-measure starts and prints its usage
+        run: |
+          # With no command it refuses with its usage, which it prints only
+          # once it has started.
+          status=0
+          err=$(./saw-measure.exe 2>&1 >/dev/null) || status=$?
+          echo "exit code $status"
+          echo "$err"
+          test "$status" -eq 1
+          grep -q 'saw-measure run --cps' <<<"$err"
+
+  release:
+    needs: [build, smoke-x64]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: built
+      - name: Name the assets
+        run: |
+          set -euo pipefail
+          mkdir assets
+          for pair in x86_64-pc-windows-msvc:x64 aarch64-pc-windows-msvc:arm64; do
+            target=${pair%%:*} arch=${pair##*:}
+            cp "built/saw-$target/saw-app.exe" "assets/saw-auto-clicker-$TAG-$arch.exe"
+            cp "built/saw-$target/saw-measure.exe" "assets/saw-measure-$TAG-$arch.exe"
+          done
+          ls -l assets
+      - name: Publish the release
+        run: |
+          set -euo pipefail
+          cat > notes.md <<NOTES
+          Pick one file for your PC:
+
+          - \`saw-auto-clicker-$TAG-x64.exe\`: most Windows PCs (Intel or AMD).
+          - \`saw-auto-clicker-$TAG-arm64.exe\`: Windows on ARM, such as a Snapdragon laptop or a Windows VM on an Apple Silicon Mac.
+
+          There is no installer: save the file somewhere permanent and run it. See the README for setup, settings, and the SmartScreen prompt these unsigned builds show.
+
+          \`saw-measure-$TAG-x64.exe\` and \`saw-measure-$TAG-arm64.exe\` are a developer timing tool, not part of the app. Users don't need them.
+          NOTES
+          prerelease=()
+          [[ $TAG == *-* ]] && prerelease=(--prerelease)
+          gh release create "$TAG" assets/* --verify-tag --title "$TAG" \
+            --notes-file notes.md "${prerelease[@]}"
