@@ -44,11 +44,11 @@ Microsoft Defender Antivirus may also flag or quarantine the file, because it wa
 
 ### Administrator windows
 
-saw-auto-clicker can't click into a window running as administrator, such as Task Manager or a program you started with **Run as administrator**. Windows blocks a normal program from sending input to an elevated one. When you hold a button over such a window, the app doesn't auto-click; the hold acts as a single normal press, and the tray icon's tooltip says clicking is unavailable over elevated windows. The app doesn't offer to run as administrator itself, because a mouse hook running with administrator rights could do far more damage if it misbehaved.
+saw-auto-clicker can't click into a window running as administrator, such as Task Manager or a program you started with **Run as administrator**. Windows blocks a normal program from sending input to an elevated one. When you hold a button over such a window, the app doesn't auto-click: Windows doesn't let the app see that press at all, so the hold acts as a single normal press. If you're already auto-clicking and move the pointer onto such a window, the app is built to stop clicking and show a tooltip on the tray icon saying clicking is unavailable over elevated windows; that case hasn't been tested yet. The app doesn't offer to run as administrator itself, because a mouse hook running with administrator rights could do far more damage if it misbehaved.
 
 ### Touchpads
 
-> **Placeholder, result pending.** On a Windows on ARM virtual machine on an Apple Silicon Mac, the Mac's trackpad has not yet been tested. This section will say whether a physical trackpad click held past the delay auto-clicks and releases cleanly there, once that test is run.
+On a Windows on ARM virtual machine on an Apple Silicon Mac (VMware Fusion), the Mac's trackpad works like a mouse: pressing the trackpad down and holding past the delay auto-clicks, and releasing stops cleanly. A tap is too short to reach the delay, so it stays a normal click. A two-finger press is a right click and auto-clicks the same way.
 
 On a real Windows laptop's precision touchpad, behaviour is **unverified**: how Windows reports touchpad clicks and taps to the app isn't documented, and it hasn't been tested on such hardware. A physical mouse is the supported way to use it.
 
@@ -78,7 +78,7 @@ A missing file or a missing value means the default. A value that's invalid fall
 
 ## saw-measure
 
-Each release also carries `saw-measure-<version>-x64.exe` and `saw-measure-<version>-arm64.exe`. It's a developer tool for measuring click timing, not part of the app, and you don't need it.
+Each release also carries `saw-measure-<version>-x64.exe` and `saw-measure-<version>-arm64.exe`. It's a developer tool for measuring click timing, not part of the app, and you don't need it. Quit saw-auto-clicker before running it: both mark their clicks the same way, so with both running, each clicks and `saw-measure` counts the app's clicks as its own.
 
 ## Development
 
