@@ -84,7 +84,11 @@ Each release also carries `saw-measure-<version>-x64.exe` and `saw-measure-<vers
 
 The workspace builds on any host. Windows-only code sits behind `cfg(windows)`, so on macOS or Linux `cargo clippy --workspace --all-targets` checks everything and `cargo test -p saw-core` runs the core's tests.
 
-Pushing a tag that starts with `v` runs `.github/workflows/release.yml`, which runs the tests on the tagged commit, builds both binaries for x64 and arm64, checks that the x64 binaries launch, and publishes a GitHub release with the four files attached. A tag with a hyphen, such as `v1.0.0-rc.1`, publishes a pre-release.
+Releases are cut by bumping `version` in the workspace `Cargo.toml`. When a push to main carries a version that has no release yet, CI tests and builds it as usual, checks that the x64 binaries launch, and publishes a GitHub release tagged `v<version>` at that commit with the four files attached (`.github/workflows/release.yml`). A version with a hyphen, such as `1.0.0-rc.1`, publishes a pre-release.
+
+### The download page
+
+`site/` is the project's download page, [shadyazzwebsite.dnbg.app](https://shadyazzwebsite.dnbg.app): a deliberately shady-looking parody of a freeware download site, built with Eleventy. `cd site && npm install && npm run dev` serves it locally; `npm run build && npm test` checks the build against the host's content security policy and the page's promise that nothing entered on it leaves the browser. CI publishes each build of main; deploying it to the live site is a separate step.
 
 ## License
 

@@ -1,0 +1,18 @@
+{
+  "name": "saw-auto-clicker-site",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "saw-auto-clicker's joke download page, served at shadyazzwebsite.dnbg.app",
+  "scripts": {
+    "dev": "eleventy --serve",
+    "build": "node -e \"fs.rmSync('dist', { recursive: true, force: true })\" && eleventy",
+    "test": "node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "@11ty/eleventy": "3.1.6"
+  },
+  "engines": {
+    "node": "24.x"
+  }
+}

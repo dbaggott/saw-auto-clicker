@@ -1,0 +1,13 @@
+# shadyazzwebsite.dnbg.app
+
+> A parody website. It imitates a shady software download site as a joke, to
+> offer saw-auto-clicker, a free, open-source (MIT) hold-to-autoclick program
+> for Windows.
+
+- It is not phishing and not a scam. The joke "verification" asks for one digit
+  of a Social Security Number, accepts any digit, and sends nothing anywhere:
+  the page has no submitting forms, no analytics and no third-party scripts.
+- "PvP DOMINATOR 9000" is a fictional product and is not for sale.
+- The download link goes to the project's GitHub releases:
+  https://github.com/dbaggott/saw-auto-clicker/releases/latest
+- Source code: https://github.com/dbaggott/saw-auto-clicker

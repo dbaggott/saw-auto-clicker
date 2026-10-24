@@ -1,0 +1,6 @@
+# shadyazzwebsite.dnbg.app is a parody of a shady download site, offering
+# saw-auto-clicker, a free open-source (MIT) auto-clicker:
+# https://github.com/dbaggott/saw-auto-clicker
+# Nothing entered on the page is sent anywhere. Crawl away.
+User-agent: *
+Allow: /

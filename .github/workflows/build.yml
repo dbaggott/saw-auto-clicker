@@ -1,14 +1,10 @@
 name: Build
 
-# The release build of both binaries for each Windows target, shared by CI
-# and the release workflow so the two build the same way.
+# The release build of both binaries for each Windows target. On main, the
+# release workflow publishes these same artifacts, so what CI built is what
+# ships.
 on:
   workflow_call:
-    inputs:
-      version:
-        description: What `saw-app --version` reports. Empty means the crate version.
-        type: string
-        default: ""
 
 permissions:
   contents: read
@@ -31,8 +27,6 @@ jobs:
         with:
           key: ${{ matrix.target }}
       - run: cargo build --workspace --release --locked --target ${{ matrix.target }}
-        env:
-          SAW_VERSION: ${{ inputs.version }}
       - uses: actions/upload-artifact@v7
         with:
           name: saw-${{ matrix.target }}

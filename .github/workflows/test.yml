@@ -1,7 +1,7 @@
 name: Test
 
-# Format, lint and the full test suite on Windows, shared by CI and the
-# release workflow so a tag can't publish a commit that fails them.
+# Format, lint and the full test suite on Windows. CI's release job needs it,
+# so a version bump can't publish a commit that fails them.
 on:
   workflow_call:
 
