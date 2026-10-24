@@ -104,7 +104,8 @@ fn from_file(file: File) -> Loaded {
     let hotkey = pick(
         &mut problems,
         "hotkey",
-        file.hotkey.map(|text| hotkey_text::parse(&text)),
+        file.hotkey
+            .map(|text| hotkey_text::parse(&text).and_then(hotkey_text::usable)),
         defaults.hotkey(),
     );
     let settings = Settings::new(cps, delay, jitter, hotkey)

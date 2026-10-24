@@ -9,7 +9,7 @@ use eframe::egui;
 use saw_core::{ACTIVATION_DELAY_RANGE, CPS_RANGE, JITTER_RANGE};
 
 use crate::form::Draft;
-use crate::hotkey_text::{KEYS, key_name};
+use crate::hotkey_text::{self, KEYS, key_name};
 use crate::icon;
 use crate::win::app::{App, Next};
 
@@ -166,7 +166,9 @@ impl Window<'_> {
     }
 
     fn apply(&mut self) {
-        match self.draft.to_settings() {
+        let checked = hotkey_text::usable(self.draft.hotkey)
+            .and_then(|_| self.draft.to_settings().map_err(|e| e.to_string()));
+        match checked {
             Ok(settings) => {
                 self.app.apply_settings(settings);
                 self.apply_problem = None;
@@ -174,8 +176,8 @@ impl Window<'_> {
                 // A refused hotkey shows the one still in effect.
                 self.draft = Draft::from(&self.app.settings);
             }
-            Err(e) => {
-                self.apply_problem = Some(e.to_string());
+            Err(why) => {
+                self.apply_problem = Some(why);
                 self.applied = false;
             }
         }

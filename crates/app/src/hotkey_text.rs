@@ -130,6 +130,46 @@ pub fn parse(text: &str) -> Result<Hotkey, String> {
     Ok(Hotkey { modifiers, key })
 }
 
+/// Refuses a letter or digit without Ctrl, Alt or Win: registered alone or
+/// with only Shift, it would take that key away from typing in every app.
+pub fn usable(hotkey: Hotkey) -> Result<Hotkey, String> {
+    let m = hotkey.modifiers;
+    let function_key = matches!(
+        hotkey.key,
+        Key::F1
+            | Key::F2
+            | Key::F3
+            | Key::F4
+            | Key::F5
+            | Key::F6
+            | Key::F7
+            | Key::F8
+            | Key::F9
+            | Key::F10
+            | Key::F11
+            | Key::F12
+            | Key::F13
+            | Key::F14
+            | Key::F15
+            | Key::F16
+            | Key::F17
+            | Key::F18
+            | Key::F19
+            | Key::F20
+            | Key::F21
+            | Key::F22
+            | Key::F23
+            | Key::F24
+    );
+    if !function_key && !(m.ctrl || m.alt || m.meta) {
+        return Err(format!(
+            "{} needs Ctrl, Alt or Win, or it would stop that key typing",
+            HotkeyText(hotkey)
+        ));
+    }
+    Ok(hotkey)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -171,6 +211,24 @@ mod tests {
     #[test]
     fn case_spacing_and_order_are_ignored() {
         assert_eq!(parse(" alt + CONTROL+f8 "), Ok(Hotkey::default()));
+    }
+
+    #[test]
+    fn letters_and_digits_need_a_non_shift_modifier() {
+        let with = |shift, ctrl, key| Hotkey {
+            modifiers: Modifiers {
+                shift,
+                ctrl,
+                ..Modifiers::default()
+            },
+            key,
+        };
+        assert!(usable(with(false, false, Key::A)).is_err());
+        assert!(usable(with(true, false, Key::Digit1)).is_err());
+        assert!(usable(with(false, true, Key::A)).is_ok());
+        assert!(usable(with(false, false, Key::F)).is_err());
+        assert!(usable(with(false, false, Key::F8)).is_ok());
+        assert!(usable(with(true, false, Key::F24)).is_ok());
     }
 
     #[test]

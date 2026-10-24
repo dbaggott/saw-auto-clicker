@@ -39,8 +39,9 @@ struct ToMain {
 
 impl ToMain {
     fn send(&self, event: Event) {
-        // Both fail only once the main thread has stopped listening, during
-        // quit, when nothing is left to tell.
+        // The send fails only once quit has dropped the receiver. A lost
+        // wake-up, as in a modal loop, only delays handling to the next
+        // message the main thread gets.
         if self.events.send(event).is_ok() {
             let _ = unsafe { PostThreadMessageW(self.thread_id, WM_APP, WPARAM(0), LPARAM(0)) };
         }
