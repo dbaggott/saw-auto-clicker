@@ -1,0 +1,37 @@
+<!doctype html>
+<!--
+  PARODY. This page is a joke imitating a shady download site. It offers
+  saw-auto-clicker, a real open-source (MIT) auto-clicker: {{ site.repo }}
+  Nothing entered here is sent anywhere.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ title }}</title>
+    <meta name="description" content="Parody of a shady download site, offering saw-auto-clicker, a free open-source auto-clicker for Windows. A joke: nothing you enter is sent anywhere.">
+    <link rel="canonical" href="{{ site.url }}{{ page.url }}">
+    <link rel="stylesheet" href="/css/site.css">
+    <script src="/js/site.js" defer></script>
+  </head>
+  <body>
+    {% include "parody-notice.njk" %}
+    <div class="ticker" aria-hidden="true">
+      <p>★ 4,281,337 DOWNLOADS TODAY ★ VIRUS SCAN: PASSED (WE SCANNED OURSELVES) ★ NO CREDIT CARD REQUIRED ★ NO KEYLOGGER INCLUDED ★ LIMITED TIME: STILL FREE ★</p>
+    </div>
+    <div class="frame">
+      <header class="masthead">
+        <a class="logo" href="/">shadyazz<span>website</span><small>.dnbg.app</small></a>
+        <ul class="badges" aria-label="Certifications">
+          <li class="badge badge-safe">100% SAFE<small>self-certified</small></li>
+          <li class="badge badge-secure">SECURE<small>we promise</small></li>
+          <li class="badge badge-award">5 STARS<small>from us</small></li>
+        </ul>
+      </header>
+      {{ content | safe }}
+      <footer class="fineprint">
+        <p>shadyazzwebsite.dnbg.app is a parody. The auto-clicker is real, free and open source (MIT): <a href="{{ site.repo }}">source on GitHub</a>. Nothing you pick or type on this page leaves your browser. No animals, bank accounts or Social Security Numbers were harmed in the making of this website.</p>
+      </footer>
+    </div>
+  </body>
+</html>

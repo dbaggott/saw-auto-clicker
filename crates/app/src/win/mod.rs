@@ -14,13 +14,6 @@ use instance::{SingleInstance, show_error, show_info};
 
 const USAGE: &str = "Usage: saw-app [--self-test | --version]";
 
-/// The release tag when the release workflow built this binary, otherwise
-/// the crate version. CI sets the variable empty.
-const VERSION: &str = match option_env!("SAW_VERSION") {
-    Some(version) if !version.is_empty() => version,
-    _ => env!("CARGO_PKG_VERSION"),
-};
-
 pub fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.iter().map(String::as_str).collect::<Vec<_>>()[..] {
@@ -31,7 +24,7 @@ pub fn main() -> ExitCode {
         // A GUI-subsystem process has no console, so the line is seen only
         // when stdout is redirected.
         ["--version"] => {
-            println!("saw-app {VERSION}");
+            println!("saw-app {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
         _ => {
