@@ -56,8 +56,9 @@ pub enum Next {
     Quit,
 }
 
-/// Whether applied settings are written to the settings file. The self-test
-/// applies settings without touching the user's file.
+/// Whether applied settings and the armed state are written to the settings
+/// file. The self-test arms whatever that file holds, and applies settings
+/// without touching it.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Persist {
     Yes,
@@ -72,6 +73,10 @@ pub struct App {
     pub save_problem: Option<String>,
     config_path: Option<PathBuf>,
     persist: Persist,
+    /// The armed state last written to the settings file, or tried: a toggle
+    /// that differs from it is saved, and a failed save waits for the next
+    /// toggle rather than retrying on every arrival.
+    armed_written: bool,
     tray_state: TrayState,
     tray: Tray,
     start_at_login: StartAtLogin,
@@ -82,14 +87,16 @@ pub struct App {
 }
 
 impl App {
-    /// Starts everything and arms (Q-b). Runs on the main thread, which must
-    /// then pump messages: [`App::run`] does.
+    /// Starts everything and arms (Q-b) unless the settings file says it was
+    /// left disarmed. Runs on the main thread, which must then pump messages:
+    /// [`App::run`] does.
     pub fn start(persist: Persist) -> Result<App, String> {
         let config_path = config::default_path();
         let loaded = match &config_path {
             Some(path) => config::load(path),
             None => config::Loaded {
                 settings: Settings::default(),
+                armed: true,
                 problem: Some("APPDATA is not set, so settings can't be saved".into()),
             },
         };
@@ -142,6 +149,7 @@ impl App {
             save_problem: None,
             config_path,
             persist,
+            armed_written: loaded.armed,
             tray_state,
             tray,
             start_at_login,
@@ -149,7 +157,9 @@ impl App {
             hotkeys: Some(hotkeys),
             clicker: Some(clicker),
         };
-        app.clicker().controller().set_armed(true);
+        if loaded.armed || persist == Persist::No {
+            app.clicker().controller().set_armed(true);
+        }
         Ok(app)
     }
 
@@ -210,6 +220,11 @@ impl App {
         if self.tray_state != shown {
             self.tray.show(self.tray_state);
         }
+        // Saved on each change rather than at quit, which Windows can skip at
+        // sign-out or shutdown.
+        if self.tray_state.armed != self.armed_written {
+            self.save();
+        }
         // Only the menu matters; icon clicks are drained so they don't pile up.
         while TrayIconEvent::receiver().try_recv().is_ok() {}
         let mut next = Next::Wait;
@@ -253,10 +268,18 @@ impl App {
         self.hotkey_problem = applied.hotkey_problem;
         self.tray_state.hotkey_missing = self.active_hotkey.is_none();
         self.tray.show(self.tray_state);
+        self.save();
+    }
+
+    /// Writes the current settings and armed state to the settings file,
+    /// unless this run doesn't persist, and records why when it can't.
+    fn save(&mut self) {
+        let armed = self.tray_state.armed;
+        self.armed_written = armed;
         self.save_problem = match (&self.config_path, self.persist) {
             (_, Persist::No) => None,
             (None, Persist::Yes) => Some("APPDATA is not set, so settings can't be saved".into()),
-            (Some(path), Persist::Yes) => match config::save(path, &self.settings) {
+            (Some(path), Persist::Yes) => match config::save(path, &self.settings, armed) {
                 Ok(()) => {
                     // The file now holds valid settings throughout.
                     self.config_problem = None;

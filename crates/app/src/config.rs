@@ -1,6 +1,6 @@
 //! The settings file (R14): `%APPDATA%\saw-auto-clicker\config.toml` by
 //! default, loaded at startup and written whenever the settings window
-//! applies a change.
+//! applies a change or the app is armed or disarmed.
 
 use saw_core::{CPS_RANGE, Settings};
 use serde::{Deserialize, Serialize};
@@ -30,6 +30,7 @@ struct FileIn {
     activation_delay_ms: Option<toml::Value>,
     jitter_percent: Option<toml::Value>,
     hotkey: Option<toml::Value>,
+    armed: Option<toml::Value>,
 }
 
 /// The file as written.
@@ -39,25 +40,31 @@ struct FileOut {
     activation_delay_ms: u32,
     jitter_percent: u32,
     hotkey: String,
+    armed: bool,
 }
 
 /// What [`load`] read.
 #[derive(Debug, PartialEq)]
 pub struct Loaded {
     pub settings: Settings,
+    /// Whether the app was armed when it last saved, so it starts the way it
+    /// was left. Armed when the file doesn't say.
+    pub armed: bool,
     /// Why some or all of the file was replaced by defaults, for the settings
     /// window to show. `None` when the file was read in full, or is missing.
     pub problem: Option<String>,
 }
 
-/// Reads the settings, using Q1–Q3's default for each value that is missing
-/// or invalid, and for all of them when the file is missing or isn't TOML.
+/// Reads the settings and the armed state, using the default for each value
+/// that is missing or invalid (Q1–Q3's for the settings, armed for the
+/// state), and for all of them when the file is missing or isn't TOML.
 pub fn load(path: &Path) -> Loaded {
     let text = match fs::read_to_string(path) {
         Ok(text) => text,
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
             return Loaded {
                 settings: Settings::default(),
+                armed: true,
                 problem: None,
             };
         }
@@ -72,6 +79,7 @@ pub fn load(path: &Path) -> Loaded {
 fn defaults_because(problem: String) -> Loaded {
     Loaded {
         settings: Settings::default(),
+        armed: true,
         problem: Some(format!("{problem}; using the defaults")),
     }
 }
@@ -111,6 +119,15 @@ fn from_file(file: FileIn) -> Loaded {
         }),
         defaults.hotkey,
     );
+    let armed = pick(
+        &mut problems,
+        "armed",
+        file.armed.map(|v| {
+            v.as_bool()
+                .ok_or_else(|| format!("must be true or false, got {v}"))
+        }),
+        true,
+    );
     let draft = Draft {
         cps,
         delay_ms,
@@ -126,7 +143,11 @@ fn from_file(file: FileIn) -> Loaded {
             problems.join(", ")
         )
     });
-    Loaded { settings, problem }
+    Loaded {
+        settings,
+        armed,
+        problem,
+    }
 }
 
 /// A whole number within `range`.
@@ -158,15 +179,17 @@ fn pick<T>(
     }
 }
 
-/// Writes the settings, creating the directory if needed. The file is
-/// replaced in one step, so a failed write leaves the previous one intact.
-pub fn save(path: &Path, settings: &Settings) -> io::Result<()> {
+/// Writes the settings and the armed state, creating the directory if
+/// needed. The file is replaced in one step, so a failed write leaves the
+/// previous one intact.
+pub fn save(path: &Path, settings: &Settings, armed: bool) -> io::Result<()> {
     let draft = Draft::from(settings);
     let file = FileOut {
         cps: draft.cps,
         activation_delay_ms: draft.delay_ms,
         jitter_percent: draft.jitter_percent,
         hotkey: HotkeyText(draft.hotkey).to_string(),
+        armed,
     };
     let text = toml::to_string(&file).map_err(io::Error::other)?;
     if let Some(dir) = path.parent() {
@@ -232,6 +255,7 @@ mod tests {
             load(&dir.file()),
             Loaded {
                 settings: Settings::default(),
+                armed: true,
                 problem: None
             }
         );
@@ -240,28 +264,78 @@ mod tests {
     #[test]
     fn saved_settings_load_back_and_the_directory_is_created() {
         let dir = TempDir::new("round-trip");
-        save(&dir.file(), &custom()).unwrap();
+        save(&dir.file(), &custom(), true).unwrap();
         assert_eq!(
             load(&dir.file()),
             Loaded {
                 settings: custom(),
+                armed: true,
                 problem: None
             }
         );
-        save(&dir.file(), &Settings::default()).unwrap();
+        save(&dir.file(), &Settings::default(), true).unwrap();
         assert_eq!(load(&dir.file()).settings, Settings::default());
+    }
+
+    #[test]
+    fn the_armed_state_loads_back() {
+        let dir = TempDir::new("armed-round-trip");
+        save(&dir.file(), &Settings::default(), false).unwrap();
+        assert!(!load(&dir.file()).armed);
+        save(&dir.file(), &Settings::default(), true).unwrap();
+        assert!(load(&dir.file()).armed);
+    }
+
+    #[test]
+    fn saving_disarmed_keeps_the_other_values() {
+        let dir = TempDir::new("disarmed-keeps");
+        save(&dir.file(), &custom(), true).unwrap();
+        let before = load(&dir.file());
+        save(&dir.file(), &before.settings, false).unwrap();
+        assert_eq!(
+            load(&dir.file()),
+            Loaded {
+                settings: custom(),
+                armed: false,
+                problem: None
+            }
+        );
+    }
+
+    #[test]
+    fn a_missing_armed_value_means_armed() {
+        let dir = TempDir::new("armed-missing");
+        write(&dir.file(), "cps = 20\n");
+        let loaded = load(&dir.file());
+        assert!(loaded.armed);
+        assert_eq!(loaded.problem, None);
+    }
+
+    #[test]
+    fn an_armed_value_that_is_not_a_boolean_means_armed_with_a_reason() {
+        let dir = TempDir::new("armed-wrong-type");
+        write(&dir.file(), "cps = 20\narmed = \"no\"\n");
+        let loaded = load(&dir.file());
+        assert!(loaded.armed);
+        assert_eq!(loaded.settings.cps(), 20);
+        let problem = loaded.problem.unwrap();
+        assert!(
+            problem.contains("armed must be true or false"),
+            "{problem:?}"
+        );
     }
 
     #[test]
     fn the_file_is_readable_toml() {
         let dir = TempDir::new("format");
-        save(&dir.file(), &custom()).unwrap();
+        save(&dir.file(), &custom(), false).unwrap();
         let text = fs::read_to_string(dir.file()).unwrap();
         for line in [
             "cps = 37",
             "activation_delay_ms = 600",
             "jitter_percent = 30",
             "hotkey = \"Shift+Win+K\"",
+            "armed = false",
         ] {
             assert!(text.contains(line), "{line:?} missing from:\n{text}");
         }
@@ -337,6 +411,7 @@ mod tests {
             load(&dir.file()),
             Loaded {
                 settings: Settings::new(20, d.activation_delay(), d.jitter(), d.hotkey()).unwrap(),
+                armed: true,
                 problem: None
             }
         );
