@@ -10,3 +10,6 @@ publish = false
 [dependencies]
 saw-core.workspace = true
 saw-windows.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = ["Win32_System_Console"] }
