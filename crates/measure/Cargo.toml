@@ -1,0 +1,12 @@
+[package]
+name = "saw-measure"
+description = "Development tool that arms the clicker with fixed settings and logs the timestamp of every click applications received."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+saw-core.workspace = true
+saw-windows.workspace = true
