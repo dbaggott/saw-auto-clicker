@@ -1,0 +1,83 @@
+name: CI
+
+# No `branches:` filter on pull_request: stacked PRs target feature branches,
+# and they need CI as much as PRs into main do.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Installs the channel, components and targets rust-toolchain.toml pins.
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+
+  # The core is developed on macOS, so the workspace has to keep checking
+  # there and the core's tests have to keep passing without Windows.
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace --all-targets
+      - run: cargo test -p saw-core
+
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [x86_64-pc-windows-msvc, aarch64-pc-windows-msvc]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - run: cargo build --workspace --release --target ${{ matrix.target }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: saw-${{ matrix.target }}
+          path: |
+            target/${{ matrix.target }}/release/saw-app.exe
+            target/${{ matrix.target }}/release/saw-measure.exe
+          if-no-files-found: error
+
+  # The one check branch protection is meant to require, so a job gates merges
+  # by being listed in `needs:`. `if: always()` keeps a failed dependency from
+  # skipping this job, which branch protection would read as passing.
+  ci-required:
+    if: always()
+    needs: [test, macos, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify every required job succeeded
+        env:
+          RESULTS: ${{ join(needs.*.result, ',') }}
+        run: |
+          set -euo pipefail
+          echo "needs.*.result = $RESULTS"
+          for r in ${RESULTS//,/ }; do
+            case "$r" in
+              success|skipped) ;;
+              *) echo "::error::dependency reported '$r'"; exit 1 ;;
+            esac
+          done

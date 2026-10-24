@@ -1,0 +1,14 @@
+[package]
+name = "saw-windows"
+description = "Windows backend of saw-auto-clicker: low-level mouse hook, input injection, timer and hotkey."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+saw-core.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = "0.62"

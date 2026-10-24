@@ -1,0 +1,12 @@
+[package]
+name = "saw-app"
+description = "The saw-auto-clicker tray app."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+saw-core.workspace = true
+saw-windows.workspace = true

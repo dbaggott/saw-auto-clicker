@@ -1,0 +1,8 @@
+[package]
+name = "saw-core"
+description = "Platform-independent core of saw-auto-clicker: button gate, scheduler and Jitter."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
