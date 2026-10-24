@@ -12,13 +12,28 @@ use std::time::Duration;
 use app::{App, Persist};
 use instance::{SingleInstance, show_error, show_info};
 
-const USAGE: &str = "Usage: saw-app [--self-test]";
+const USAGE: &str = "Usage: saw-app [--self-test | --version]";
+
+/// The release tag when the release workflow built this binary, otherwise
+/// the crate version. CI sets the variable empty.
+const VERSION: &str = match option_env!("SAW_VERSION") {
+    Some(version) if !version.is_empty() => version,
+    _ => env!("CARGO_PKG_VERSION"),
+};
 
 pub fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.iter().map(String::as_str).collect::<Vec<_>>()[..] {
         [] => run(),
         ["--self-test"] => self_test(),
+        // Before the single-instance check and the hook, so the release
+        // workflow's smoke check can run it anywhere and read its exit code.
+        // A GUI-subsystem process has no console, so the line is seen only
+        // when stdout is redirected.
+        ["--version"] => {
+            println!("saw-app {VERSION}");
+            ExitCode::SUCCESS
+        }
         _ => {
             show_error(USAGE);
             ExitCode::FAILURE
