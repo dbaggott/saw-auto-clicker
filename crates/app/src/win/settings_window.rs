@@ -6,9 +6,9 @@
 use std::time::Duration;
 
 use eframe::egui;
-use saw_core::{ACTIVATION_DELAY_RANGE, CPS_RANGE, JITTER_RANGE};
+use saw_core::CPS_RANGE;
 
-use crate::form::Draft;
+use crate::form::{self, Draft};
 use crate::hotkey_text::{self, KEYS, key_name};
 use crate::icon;
 use crate::win::app::{App, Next};
@@ -94,9 +94,7 @@ impl eframe::App for Window<'_> {
 
 impl Window<'_> {
     fn form(&mut self, ui: &mut egui::Ui) {
-        let delay_ms = ACTIVATION_DELAY_RANGE.start().as_millis() as u32
-            ..=ACTIVATION_DELAY_RANGE.end().as_millis() as u32;
-        let jitter_percent = 0..=(JITTER_RANGE.end() * 100.0).round() as u32;
+        let (delay_ms, jitter_percent) = (form::delay_ms_range(), form::jitter_percent_range());
         let d = &mut self.draft;
         egui::Grid::new("settings")
             .num_columns(2)
@@ -132,9 +130,11 @@ impl Window<'_> {
 
         ui.add_space(12.0);
         let changed = self.draft != Draft::from(&self.app.settings);
+        // With no hotkey active, applying unchanged settings retries it.
+        let can_apply = changed || self.app.active_hotkey.is_none();
         ui.horizontal(|ui| {
             if ui
-                .add_enabled(changed, egui::Button::new("Apply"))
+                .add_enabled(can_apply, egui::Button::new("Apply"))
                 .clicked()
             {
                 self.apply();
@@ -160,7 +160,7 @@ impl Window<'_> {
         if let Some(problem) = &self.app.config_problem {
             ui.colored_label(warning, problem);
         }
-        if self.applied && !changed {
+        if self.applied && !changed && self.app.hotkey_problem.is_none() {
             ui.label("Applied. New settings take effect from the next press.");
         }
     }

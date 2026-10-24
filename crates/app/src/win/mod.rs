@@ -51,10 +51,13 @@ fn run() -> ExitCode {
 /// closes the settings window twice with the tray running, applies the
 /// settings unchanged, and quits through the same path as the tray's Quit.
 /// Reports each step on stdout and exits non-zero on the first failure. It
-/// skips the one-instance check and never writes the settings file, so it
-/// runs beside an installed copy without disturbing it.
+/// never writes the settings file or the registry, and refuses to run while
+/// another instance is running, which it would otherwise disturb.
 fn self_test() -> ExitCode {
     let result = (|| {
+        let _instance = SingleInstance::claim()
+            .map_err(|e| format!("cannot check for another instance: {e}"))?
+            .ok_or("saw-auto-clicker is running; quit it before the self-test")?;
         let mut app = App::start(Persist::No)?;
         println!("started: tray icon created");
         app.wait_until_armed(Duration::from_secs(5))?;

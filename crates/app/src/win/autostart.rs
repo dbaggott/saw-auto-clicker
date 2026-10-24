@@ -32,15 +32,16 @@ impl StartAtLogin {
         }
     }
 
-    pub fn is_enabled(&self) -> io::Result<bool> {
-        Ok(self.command()?.is_some())
+    /// Whether the value starts `exe`.
+    pub fn starts(&self, exe: &Path) -> io::Result<bool> {
+        Ok(self
+            .command()?
+            .is_some_and(|command| command.eq_ignore_ascii_case(&command_for(exe))))
     }
 
-    /// Points the value at `exe`, quoted so a path with spaces stays one
-    /// argument.
+    /// Points the value at `exe`.
     pub fn enable(&self, exe: &Path) -> io::Result<()> {
-        let command = format!("\"{}\"", exe.display());
-        let data: Vec<u16> = command.encode_utf16().chain([0]).collect();
+        let data: Vec<u16> = command_for(exe).encode_utf16().chain([0]).collect();
         let result = unsafe {
             RegSetKeyValueW(
                 HKEY_CURRENT_USER,
@@ -101,6 +102,11 @@ impl StartAtLogin {
     }
 }
 
+/// Quoted so a path with spaces stays one argument.
+fn command_for(exe: &Path) -> String {
+    format!("\"{}\"", exe.display())
+}
+
 fn check(result: WIN32_ERROR) -> io::Result<()> {
     if result == ERROR_SUCCESS {
         Ok(())
@@ -123,8 +129,12 @@ mod tests {
 
     impl TestKey {
         fn new() -> TestKey {
+            TestKey::new_named("round-trip")
+        }
+
+        fn new_named(name: &str) -> TestKey {
             TestKey(format!(
-                r"Software\saw-auto-clicker-test-{}",
+                r"Software\saw-auto-clicker-test-{name}-{}",
                 std::process::id()
             ))
         }
@@ -140,18 +150,28 @@ mod tests {
     fn enable_and_disable_add_and_remove_the_value() {
         let key = TestKey::new();
         let entry = StartAtLogin::at(&key.0, VALUE_NAME);
-        assert!(!entry.is_enabled().unwrap());
+        let exe = PathBuf::from(r"C:\Program Files\saw auto clicker\saw-app.exe");
+        assert!(!entry.starts(&exe).unwrap());
         entry.disable().unwrap();
 
-        let exe = PathBuf::from(r"C:\Program Files\saw auto clicker\saw-app.exe");
         entry.enable(&exe).unwrap();
-        assert!(entry.is_enabled().unwrap());
+        assert!(entry.starts(&exe).unwrap());
         assert_eq!(
             entry.command().unwrap().as_deref(),
             Some(r#""C:\Program Files\saw auto clicker\saw-app.exe""#)
         );
 
         entry.disable().unwrap();
-        assert!(!entry.is_enabled().unwrap());
+        assert!(!entry.starts(&exe).unwrap());
+        assert_eq!(entry.command().unwrap(), None);
+    }
+
+    #[test]
+    fn a_value_for_another_copy_does_not_count() {
+        let key = TestKey::new_named("other-copy");
+        let entry = StartAtLogin::at(&key.0, VALUE_NAME);
+        entry.enable(Path::new(r"D:\old\saw-app.exe")).unwrap();
+        assert!(!entry.starts(Path::new(r"C:\new\saw-app.exe")).unwrap());
+        assert!(entry.starts(Path::new(r"d:\OLD\saw-app.exe")).unwrap());
     }
 }

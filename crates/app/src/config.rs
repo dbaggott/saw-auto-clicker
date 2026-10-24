@@ -2,14 +2,13 @@
 //! default, loaded at startup and written whenever the settings window
 //! applies a change.
 
+use saw_core::{CPS_RANGE, Settings};
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
-use saw_core::{ACTIVATION_DELAY_RANGE, CPS_RANGE, JITTER_RANGE, Settings};
-use serde::{Deserialize, Serialize};
-
+use crate::form::{self, Draft};
 use crate::hotkey_text::{self, HotkeyText};
 
 /// Where the settings live for this user, or `None` when `APPDATA` is unset.
@@ -22,14 +21,24 @@ pub fn default_path() -> Option<PathBuf> {
     )
 }
 
-/// The file's layout. Every field is optional so that one bad or missing
-/// value falls back to its own default without discarding the others.
-#[derive(Default, Deserialize, Serialize)]
-struct File {
-    cps: Option<u32>,
-    activation_delay_ms: Option<u64>,
-    jitter_percent: Option<u32>,
-    hotkey: Option<String>,
+/// The file as read. Each field is any TOML value, checked on its own, so
+/// that one bad or missing value falls back to its own default without
+/// discarding the others.
+#[derive(Deserialize)]
+struct FileIn {
+    cps: Option<toml::Value>,
+    activation_delay_ms: Option<toml::Value>,
+    jitter_percent: Option<toml::Value>,
+    hotkey: Option<toml::Value>,
+}
+
+/// The file as written.
+#[derive(Serialize)]
+struct FileOut {
+    cps: u32,
+    activation_delay_ms: u32,
+    jitter_percent: u32,
+    hotkey: String,
 }
 
 /// What [`load`] read.
@@ -41,9 +50,8 @@ pub struct Loaded {
     pub problem: Option<String>,
 }
 
-/// Reads the settings, using Q1–Q3's default for each value that is missing,
-/// or out of range, and for all of them when the file is missing, isn't TOML,
-/// or holds a value of the wrong type.
+/// Reads the settings, using Q1–Q3's default for each value that is missing
+/// or invalid, and for all of them when the file is missing or isn't TOML.
 pub fn load(path: &Path) -> Loaded {
     let text = match fs::read_to_string(path) {
         Ok(text) => text,
@@ -55,12 +63,9 @@ pub fn load(path: &Path) -> Loaded {
         }
         Err(e) => return defaults_because(format!("{} could not be read: {e}", path.display())),
     };
-    match toml::from_str::<File>(&text) {
+    match toml::from_str::<FileIn>(&text) {
         Ok(file) => from_file(file),
-        Err(e) => defaults_because(format!(
-            "{} could not be read as settings: {e}",
-            path.display()
-        )),
+        Err(e) => defaults_because(format!("{} is not valid TOML: {e}", path.display())),
     }
 }
 
@@ -71,44 +76,49 @@ fn defaults_because(problem: String) -> Loaded {
     }
 }
 
-fn from_file(file: File) -> Loaded {
-    let defaults = Settings::default();
+fn from_file(file: FileIn) -> Loaded {
+    let defaults = Draft::from(&Settings::default());
     let mut problems = Vec::new();
-    let cps = pick(
-        &mut problems,
-        "cps",
-        file.cps
-            .map(|v| in_range(v, *CPS_RANGE.start(), *CPS_RANGE.end())),
-        defaults.cps(),
-    );
-    let delay_ms_range = (
-        ACTIVATION_DELAY_RANGE.start().as_millis() as u64,
-        ACTIVATION_DELAY_RANGE.end().as_millis() as u64,
-    );
-    let delay = pick(
-        &mut problems,
+    let mut whole = |name, value: Option<toml::Value>, range, default| {
+        pick(
+            &mut problems,
+            name,
+            value.map(|v| whole_in(&v, range)),
+            default,
+        )
+    };
+    let cps = whole("cps", file.cps, CPS_RANGE, defaults.cps);
+    let delay_ms = whole(
         "activation_delay_ms",
-        file.activation_delay_ms
-            .map(|v| in_range(v, delay_ms_range.0, delay_ms_range.1).map(Duration::from_millis)),
-        defaults.activation_delay(),
+        file.activation_delay_ms,
+        form::delay_ms_range(),
+        defaults.delay_ms,
     );
-    let jitter = pick(
-        &mut problems,
+    let jitter_percent = whole(
         "jitter_percent",
-        file.jitter_percent.map(|v| {
-            let max = (JITTER_RANGE.end() * 100.0).round() as u32;
-            in_range(v, 0, max).map(|p| f64::from(p) / 100.0)
-        }),
-        defaults.jitter(),
+        file.jitter_percent,
+        form::jitter_percent_range(),
+        defaults.jitter_percent,
     );
     let hotkey = pick(
         &mut problems,
         "hotkey",
-        file.hotkey
-            .map(|text| hotkey_text::parse(&text).and_then(hotkey_text::usable)),
-        defaults.hotkey(),
+        file.hotkey.map(|v| {
+            v.as_str()
+                .ok_or_else(|| format!("must be text such as \"Ctrl+Alt+F8\", got {v}"))
+                .and_then(hotkey_text::parse)
+                .and_then(hotkey_text::usable)
+        }),
+        defaults.hotkey,
     );
-    let settings = Settings::new(cps, delay, jitter, hotkey)
+    let draft = Draft {
+        cps,
+        delay_ms,
+        jitter_percent,
+        hotkey,
+    };
+    let settings = draft
+        .to_settings()
         .expect("each value was checked against its range");
     let problem = (!problems.is_empty()).then(|| {
         format!(
@@ -117,6 +127,17 @@ fn from_file(file: File) -> Loaded {
         )
     });
     Loaded { settings, problem }
+}
+
+/// A whole number within `range`.
+fn whole_in(value: &toml::Value, range: std::ops::RangeInclusive<u32>) -> Result<u32, String> {
+    let n = value
+        .as_integer()
+        .ok_or_else(|| format!("must be a whole number, got {value}"))?;
+    u32::try_from(n)
+        .ok()
+        .filter(|n| range.contains(n))
+        .ok_or_else(|| format!("must be {}–{}, got {n}", range.start(), range.end()))
 }
 
 /// A value read from the file if it is present and valid, else `default`,
@@ -137,26 +158,15 @@ fn pick<T>(
     }
 }
 
-fn in_range<T: PartialOrd + Copy + std::fmt::Display>(
-    value: T,
-    min: T,
-    max: T,
-) -> Result<T, String> {
-    if (min..=max).contains(&value) {
-        Ok(value)
-    } else {
-        Err(format!("must be {min}–{max}, got {value}"))
-    }
-}
-
 /// Writes the settings, creating the directory if needed. The file is
 /// replaced in one step, so a failed write leaves the previous one intact.
 pub fn save(path: &Path, settings: &Settings) -> io::Result<()> {
-    let file = File {
-        cps: Some(settings.cps()),
-        activation_delay_ms: Some(settings.activation_delay().as_millis() as u64),
-        jitter_percent: Some((settings.jitter() * 100.0).round() as u32),
-        hotkey: Some(HotkeyText(settings.hotkey()).to_string()),
+    let draft = Draft::from(settings);
+    let file = FileOut {
+        cps: draft.cps,
+        activation_delay_ms: draft.delay_ms,
+        jitter_percent: draft.jitter_percent,
+        hotkey: HotkeyText(draft.hotkey).to_string(),
     };
     let text = toml::to_string(&file).map_err(io::Error::other)?;
     if let Some(dir) = path.parent() {
@@ -169,6 +179,8 @@ pub fn save(path: &Path, settings: &Settings) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use saw_core::{Hotkey, Key, Modifiers};
 
     use super::*;
@@ -261,21 +273,39 @@ mod tests {
         write(&dir.file(), "cps = = 3\n[[[");
         let loaded = load(&dir.file());
         assert_eq!(loaded.settings, Settings::default());
-        assert!(
-            loaded
-                .problem
-                .unwrap()
-                .contains("could not be read as settings")
-        );
+        assert!(loaded.problem.unwrap().contains("not valid TOML"));
     }
 
     #[test]
-    fn a_value_of_the_wrong_type_gives_the_defaults() {
+    fn a_value_of_the_wrong_type_falls_back_alone() {
         let dir = TempDir::new("wrong-type");
-        write(&dir.file(), "cps = \"fast\"\n");
+        write(
+            &dir.file(),
+            "cps = \"fast\"\nactivation_delay_ms = 600\njitter_percent = 12.5\nhotkey = 8\n",
+        );
         let loaded = load(&dir.file());
-        assert_eq!(loaded.settings, Settings::default());
-        assert!(loaded.problem.is_some());
+        let d = Settings::default();
+        assert_eq!(
+            loaded.settings,
+            Settings::new(d.cps(), Duration::from_millis(600), d.jitter(), d.hotkey()).unwrap()
+        );
+        let problem = loaded.problem.unwrap();
+        for name in ["cps", "jitter_percent", "hotkey"] {
+            assert!(problem.contains(name), "{name} not named in {problem:?}");
+        }
+    }
+
+    #[test]
+    fn a_negative_value_falls_back_alone() {
+        let dir = TempDir::new("negative");
+        write(&dir.file(), "cps = -1\nactivation_delay_ms = 600\n");
+        let loaded = load(&dir.file());
+        assert_eq!(loaded.settings.cps(), Settings::default().cps());
+        assert_eq!(
+            loaded.settings.activation_delay(),
+            Duration::from_millis(600)
+        );
+        assert!(loaded.problem.unwrap().contains("cps must be 1–50, got -1"));
     }
 
     #[test]

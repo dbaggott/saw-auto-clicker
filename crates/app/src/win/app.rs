@@ -125,7 +125,15 @@ impl App {
             elevated_warning: false,
             hotkey_missing: applied.active_hotkey.is_none(),
         };
-        let tray = Tray::new(tray_state, start_at_login.is_enabled().unwrap_or(false))?;
+        let tray = match Tray::new(tray_state, start_at_login_checked(&start_at_login)) {
+            Ok(tray) => tray,
+            Err(e) => {
+                // Still disarmed, so nothing is held up; stop in quit's order.
+                drop(hotkeys);
+                let _ = clicker.shutdown();
+                return Err(e);
+            }
+        };
         let app = App {
             settings: applied.settings,
             active_hotkey: applied.active_hotkey,
@@ -160,8 +168,11 @@ impl App {
             match self.handle_arrivals() {
                 Next::Wait => {}
                 Next::OpenSettings => {
-                    if crate::win::settings_window::show(&mut self, None)? == Next::Quit {
-                        break;
+                    match crate::win::settings_window::show(&mut self, None) {
+                        Ok(Next::Quit) => break,
+                        Ok(_) => {}
+                        // The tray and the clicker carry on without the window.
+                        Err(e) => show_error(&e),
                     }
                     continue;
                 }
@@ -185,6 +196,7 @@ impl App {
     /// Handles everything that has arrived without waiting, and says what
     /// the caller's loop should do next.
     pub fn handle_arrivals(&mut self) -> Next {
+        let shown = self.tray_state;
         while let Ok(event) = self.events.try_recv() {
             match event {
                 Event::Status(Status::Armed) => self.tray_state.armed = true,
@@ -194,6 +206,8 @@ impl App {
                 }
                 Event::BurstStarted => self.tray_state.elevated_warning = false,
             }
+        }
+        if self.tray_state != shown {
             self.tray.show(self.tray_state);
         }
         // Only the menu matters; icon clicks are drained so they don't pile up.
@@ -223,7 +237,7 @@ impl App {
         // The check mark shows what the registry now holds, whatever was
         // asked for.
         self.tray
-            .set_start_at_login(self.start_at_login.is_enabled().unwrap_or(false));
+            .set_start_at_login(start_at_login_checked(&self.start_at_login));
     }
 
     /// Puts the settings window's settings into effect and saves them (R14,
@@ -242,9 +256,17 @@ impl App {
         self.save_problem = match (&self.config_path, self.persist) {
             (_, Persist::No) => None,
             (None, Persist::Yes) => Some("APPDATA is not set, so settings can't be saved".into()),
-            (Some(path), Persist::Yes) => config::save(path, &self.settings)
-                .err()
-                .map(|e| format!("Settings could not be saved to {}: {e}", path.display())),
+            (Some(path), Persist::Yes) => match config::save(path, &self.settings) {
+                Ok(()) => {
+                    // The file now holds valid settings throughout.
+                    self.config_problem = None;
+                    None
+                }
+                Err(e) => Some(format!(
+                    "Settings could not be saved to {}: {e}",
+                    path.display()
+                )),
+            },
         };
     }
 
@@ -269,6 +291,15 @@ impl App {
         let stopped = self.clicker.take().expect("present until quit").shutdown();
         stopped.map_err(|_| "the scheduler thread panicked".to_string())
     }
+}
+
+/// Checked only when the `Run` value starts this executable, so a value left
+/// by a copy elsewhere reads as off and a click rewrites it. An unreadable
+/// value reads as off too, and a click replaces it.
+fn start_at_login_checked(entry: &StartAtLogin) -> bool {
+    std::env::current_exe()
+        .and_then(|exe| entry.starts(&exe))
+        .unwrap_or(false)
 }
 
 fn pump_waiting_messages() {

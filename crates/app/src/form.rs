@@ -1,9 +1,25 @@
-//! The settings window's editable copy of the settings, in the units it
-//! shows: whole milliseconds and Jitter as a percentage (R1).
+//! The settings in the units the settings window and the settings file use:
+//! whole milliseconds, and Jitter as a whole percentage (R1).
 
+use std::ops::RangeInclusive;
 use std::time::Duration;
 
-use saw_core::{Hotkey, Settings, SettingsError};
+use saw_core::{ACTIVATION_DELAY_RANGE, Hotkey, JITTER_RANGE, Settings, SettingsError};
+
+/// Q2's range in whole milliseconds.
+pub fn delay_ms_range() -> RangeInclusive<u32> {
+    ACTIVATION_DELAY_RANGE.start().as_millis() as u32
+        ..=ACTIVATION_DELAY_RANGE.end().as_millis() as u32
+}
+
+/// D5's range as a whole percentage.
+pub fn jitter_percent_range() -> RangeInclusive<u32> {
+    percent(*JITTER_RANGE.start())..=percent(*JITTER_RANGE.end())
+}
+
+fn percent(fraction: f64) -> u32 {
+    (fraction * 100.0).round() as u32
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Draft {
@@ -18,7 +34,7 @@ impl From<&Settings> for Draft {
         Draft {
             cps: settings.cps(),
             delay_ms: settings.activation_delay().as_millis() as u32,
-            jitter_percent: (settings.jitter() * 100.0).round() as u32,
+            jitter_percent: percent(settings.jitter()),
             hotkey: settings.hotkey(),
         }
     }
@@ -67,6 +83,12 @@ mod tests {
         let mut draft = Draft::from(&Settings::default());
         draft.jitter_percent = 30;
         assert_eq!(draft.to_settings().unwrap().jitter(), 0.3);
+    }
+
+    #[test]
+    fn the_whole_unit_ranges_match_q2_and_d5() {
+        assert_eq!(delay_ms_range(), 50..=2000);
+        assert_eq!(jitter_percent_range(), 0..=50);
     }
 
     #[test]
