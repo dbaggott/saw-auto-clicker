@@ -43,6 +43,9 @@ struct FileOut {
     armed: bool,
 }
 
+/// The armed state when the file doesn't give one, as on a first run.
+const DEFAULT_ARMED: bool = true;
+
 /// What [`load`] read.
 #[derive(Debug, PartialEq)]
 pub struct Loaded {
@@ -55,6 +58,17 @@ pub struct Loaded {
     pub problem: Option<String>,
 }
 
+impl Loaded {
+    /// Every default, with why they replaced the file if they did.
+    pub fn defaults(problem: Option<String>) -> Loaded {
+        Loaded {
+            settings: Settings::default(),
+            armed: DEFAULT_ARMED,
+            problem,
+        }
+    }
+}
+
 /// Reads the settings and the armed state, using the default for each value
 /// that is missing or invalid (Q1–Q3's for the settings, armed for the
 /// state), and for all of them when the file is missing or isn't TOML.
@@ -62,11 +76,7 @@ pub fn load(path: &Path) -> Loaded {
     let text = match fs::read_to_string(path) {
         Ok(text) => text,
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            return Loaded {
-                settings: Settings::default(),
-                armed: true,
-                problem: None,
-            };
+            return Loaded::defaults(None);
         }
         Err(e) => return defaults_because(format!("{} could not be read: {e}", path.display())),
     };
@@ -77,11 +87,7 @@ pub fn load(path: &Path) -> Loaded {
 }
 
 fn defaults_because(problem: String) -> Loaded {
-    Loaded {
-        settings: Settings::default(),
-        armed: true,
-        problem: Some(format!("{problem}; using the defaults")),
-    }
+    Loaded::defaults(Some(format!("{problem}; using the defaults")))
 }
 
 fn from_file(file: FileIn) -> Loaded {
@@ -126,7 +132,7 @@ fn from_file(file: FileIn) -> Loaded {
             v.as_bool()
                 .ok_or_else(|| format!("must be true or false, got {v}"))
         }),
-        true,
+        DEFAULT_ARMED,
     );
     let draft = Draft {
         cps,

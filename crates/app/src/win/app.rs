@@ -57,12 +57,22 @@ pub enum Next {
 }
 
 /// Whether applied settings and the armed state are written to the settings
-/// file. The self-test arms whatever that file holds, and applies settings
-/// without touching it.
+/// file. The self-test arms even when that file says disarmed, and never
+/// writes it.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Persist {
     Yes,
     No,
+}
+
+/// Whether a successful save clears the warning about the file as loaded.
+/// Apply does, since the user has just reviewed every value it writes. A
+/// toggle doesn't, so the warning naming a value the save replaced with its
+/// default stays until the user has seen it in the settings window.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Clears {
+    ConfigProblem,
+    Nothing,
 }
 
 pub struct App {
@@ -73,9 +83,10 @@ pub struct App {
     pub save_problem: Option<String>,
     config_path: Option<PathBuf>,
     persist: Persist,
-    /// The armed state last written to the settings file, or tried: a toggle
-    /// that differs from it is saved, and a failed save waits for the next
-    /// toggle rather than retrying on every arrival.
+    /// The armed state as last loaded from, written to, or tried on the
+    /// settings file. The clicker's reports are what change it: the tray
+    /// starts disarmed before the first report, which is not a real state.
+    /// A failed save waits for the next toggle rather than retrying.
     armed_written: bool,
     tray_state: TrayState,
     tray: Tray,
@@ -94,11 +105,9 @@ impl App {
         let config_path = config::default_path();
         let loaded = match &config_path {
             Some(path) => config::load(path),
-            None => config::Loaded {
-                settings: Settings::default(),
-                armed: true,
-                problem: Some("APPDATA is not set, so settings can't be saved".into()),
-            },
+            None => config::Loaded::defaults(Some(
+                "APPDATA is not set, so settings can't be saved".into(),
+            )),
         };
         let (events_tx, events) = mpsc::channel();
         let to_main = ToMain {
@@ -207,23 +216,27 @@ impl App {
     /// the caller's loop should do next.
     pub fn handle_arrivals(&mut self) -> Next {
         let shown = self.tray_state;
+        let mut armed_reported = None;
         while let Ok(event) = self.events.try_recv() {
             match event {
-                Event::Status(Status::Armed) => self.tray_state.armed = true,
-                Event::Status(Status::Disarmed) => self.tray_state.armed = false,
+                Event::Status(Status::Armed) => armed_reported = Some(true),
+                Event::Status(Status::Disarmed) => armed_reported = Some(false),
                 Event::Status(Status::TargetNotInjectable(_)) => {
                     self.tray_state.elevated_warning = true;
                 }
                 Event::BurstStarted => self.tray_state.elevated_warning = false,
             }
         }
+        if let Some(armed) = armed_reported {
+            self.tray_state.armed = armed;
+        }
         if self.tray_state != shown {
             self.tray.show(self.tray_state);
         }
         // Saved on each change rather than at quit, which Windows can skip at
         // sign-out or shutdown.
-        if self.tray_state.armed != self.armed_written {
-            self.save();
+        if armed_reported.is_some_and(|armed| armed != self.armed_written) {
+            self.save(self.tray_state.armed, Clears::Nothing);
         }
         // Only the menu matters; icon clicks are drained so they don't pile up.
         while TrayIconEvent::receiver().try_recv().is_ok() {}
@@ -268,21 +281,21 @@ impl App {
         self.hotkey_problem = applied.hotkey_problem;
         self.tray_state.hotkey_missing = self.active_hotkey.is_none();
         self.tray.show(self.tray_state);
-        self.save();
+        self.save(self.armed_written, Clears::ConfigProblem);
     }
 
-    /// Writes the current settings and armed state to the settings file,
-    /// unless this run doesn't persist, and records why when it can't.
-    fn save(&mut self) {
-        let armed = self.tray_state.armed;
+    /// Writes the current settings and `armed` to the settings file, unless
+    /// this run doesn't persist, and records why when it can't.
+    fn save(&mut self, armed: bool, clears: Clears) {
         self.armed_written = armed;
         self.save_problem = match (&self.config_path, self.persist) {
             (_, Persist::No) => None,
             (None, Persist::Yes) => Some("APPDATA is not set, so settings can't be saved".into()),
             (Some(path), Persist::Yes) => match config::save(path, &self.settings, armed) {
                 Ok(()) => {
-                    // The file now holds valid settings throughout.
-                    self.config_problem = None;
+                    if clears == Clears::ConfigProblem {
+                        self.config_problem = None;
+                    }
                     None
                 }
                 Err(e) => Some(format!(
