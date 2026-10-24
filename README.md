@@ -84,7 +84,7 @@ Each release also carries `saw-measure-<version>-x64.exe` and `saw-measure-<vers
 
 The workspace builds on any host. Windows-only code sits behind `cfg(windows)`, so on macOS or Linux `cargo clippy --workspace --all-targets` checks everything and `cargo test -p saw-core` runs the core's tests.
 
-Releases are cut by bumping `version` in the workspace `Cargo.toml`. When a push to main carries a version that has no release yet, CI tests and builds it as usual, checks that the x64 binaries launch, and publishes a GitHub release tagged `v<version>` at that commit with the four files attached (`.github/workflows/release.yml`). A version with a hyphen, such as `1.0.0-rc.1`, publishes a pre-release.
+Releases are cut by bumping `version` in the workspace `Cargo.toml`, then running `cargo check` so `Cargo.lock` records the new version too; CI builds with `--locked` and fails on a stale lock file. When a push to main carries a version that has no release yet, CI tests and builds it as usual, checks that the x64 binaries launch, and publishes a GitHub release tagged `v<version>` at that commit with the four files attached (`.github/workflows/release.yml`). A version with a hyphen, such as `1.0.0-rc.1`, publishes a pre-release. The download page links to the latest release, which GitHub never resolves to a pre-release.
 
 ### The download page
 
