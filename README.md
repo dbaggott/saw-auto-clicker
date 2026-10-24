@@ -54,13 +54,13 @@ On a real Windows laptop's precision touchpad, behaviour is **unverified**: how 
 
 ## Settings
 
-Open **Settings…** from the tray menu. Changes take effect from your next press after you click **Apply**.
+Open **Settings…** from the tray menu and click **Apply** to save your changes. A new hotkey works at once; the other settings take effect from your next press.
 
 | Setting | Range | Default | What it does |
 | --- | --- | --- | --- |
 | Clicks per second | 1–50 | 10 | How fast it clicks during a hold. |
 | Activation delay | 50–2000 ms | 250 ms | How long you hold before auto-clicking starts. The shorter it is, the more often an ordinary slow click turns into auto-clicking. |
-| Jitter | 0–50% | 0% | Varies each click's timing randomly by up to this share of the interval, so the clicks aren't perfectly even. The average rate stays the same. |
+| Jitter | 0–50% | 0% | Lets the gap between one click and the next vary randomly by up to this share of the normal gap, so the clicks aren't perfectly even. The average rate stays the same. |
 | Toggle hotkey | see below | Ctrl+Alt+F8 | Switches between armed and disarmed. |
 
 The hotkey is one of F1–F24, A–Z or 0–9, with any of Ctrl, Alt, Shift and Win. A letter or digit needs Ctrl, Alt or Win, since on its own (or with only Shift) it would stop that key typing in every application; the settings window refuses one without, and nothing is applied until you fix it. F12 is reserved by Windows. If another application already uses the combination you pick, the settings window says so and your previous hotkey stays in effect.
@@ -74,7 +74,7 @@ jitter_percent = 0
 hotkey = "Ctrl+Alt+F8"
 ```
 
-A missing file means all defaults. A value that's missing or invalid falls back to its default, and the settings window shows a warning naming it. If the saved hotkey can't be registered when the app starts, the tray tooltip says no hotkey is active; open Settings to pick another.
+A missing file or a missing value means the default. A value that's invalid falls back to its default, and the settings window shows a warning naming it. If the saved hotkey can't be registered when the app starts, the tray tooltip says no hotkey is active; open Settings to pick another.
 
 ## saw-measure
 
@@ -84,7 +84,7 @@ Each release also carries `saw-measure-<version>-x64.exe` and `saw-measure-<vers
 
 The workspace builds on any host. Windows-only code sits behind `cfg(windows)`, so on macOS or Linux `cargo clippy --workspace --all-targets` checks everything and `cargo test -p saw-core` runs the core's tests.
 
-Pushing a tag that starts with `v` runs `.github/workflows/release.yml`, which builds both binaries for x64 and arm64, checks that the x64 app starts, and publishes a GitHub release with the four files attached. A tag with a hyphen, such as `v1.0.0-rc.1`, publishes a pre-release.
+Pushing a tag that starts with `v` runs `.github/workflows/release.yml`, which runs the tests on the tagged commit, builds both binaries for x64 and arm64, checks that the x64 binaries launch, and publishes a GitHub release with the four files attached. A tag with a hyphen, such as `v1.0.0-rc.1`, publishes a pre-release.
 
 ## License
 

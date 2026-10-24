@@ -1,8 +1,9 @@
 name: Release
 
-# Pushing a `v*` tag builds both binaries for x64 and arm64, smoke-checks the
-# x64 build, and publishes a GitHub release for the tag with all four
-# attached. A tag with a hyphen, such as v0.0.1-rc.1, is a pre-release.
+# Pushing a `v*` tag tests the tagged commit, builds both binaries for x64
+# and arm64, checks that the x64 binaries launch, and publishes a GitHub
+# release for the tag with all four attached. A tag with a hyphen, such as
+# v0.0.1-rc.1, is a pre-release.
 on:
   push:
     tags: ["v*"]
@@ -14,6 +15,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
 
 jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
   build:
     uses: ./.github/workflows/build.yml
     with:
@@ -34,12 +38,13 @@ jobs:
         with:
           name: saw-x86_64-pc-windows-msvc
       # The runner's bash runs with -e, so each exit code is read with `||`.
-      - name: saw-app --version exits 0
+      - name: saw-app --version exits 0 and reports the tag
         run: |
           status=0
           out=$(./saw-app.exe --version) || status=$?
           echo "exit code $status, stdout: $out"
           test "$status" -eq 0
+          test "$out" = "saw-app $GITHUB_REF_NAME"
       - name: saw-measure starts and prints its usage
         run: |
           # With no command it refuses with its usage, which it prints only
@@ -52,7 +57,7 @@ jobs:
           grep -q 'saw-measure run --cps' <<<"$err"
 
   release:
-    needs: [build, smoke-x64]
+    needs: [test, build, smoke-x64]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -79,16 +84,16 @@ jobs:
         run: |
           set -euo pipefail
           cat > notes.md <<NOTES
-          Pick one file for your PC:
+          Which file to download, how to run it, and the SmartScreen prompt these unsigned builds show: see the [README](https://github.com/$GH_REPO/blob/$TAG/README.md#download-and-install).
 
-          - \`saw-auto-clicker-$TAG-x64.exe\`: most Windows PCs (Intel or AMD).
-          - \`saw-auto-clicker-$TAG-arm64.exe\`: Windows on ARM, such as a Snapdragon laptop or a Windows VM on an Apple Silicon Mac.
-
-          There is no installer: save the file somewhere permanent and run it. See the README for setup, settings, and the SmartScreen prompt these unsigned builds show.
-
-          \`saw-measure-$TAG-x64.exe\` and \`saw-measure-$TAG-arm64.exe\` are a developer timing tool, not part of the app. Users don't need them.
+          \`saw-measure-$TAG-x64.exe\` and \`saw-measure-$TAG-arm64.exe\` are a developer timing tool, not part of the app.
           NOTES
           prerelease=()
           [[ $TAG == *-* ]] && prerelease=(--prerelease)
-          gh release create "$TAG" assets/* --verify-tag --title "$TAG" \
-            --notes-file notes.md "${prerelease[@]}"
+          # A re-run after a partial upload finds the release already there.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" assets/* --clobber
+          else
+            gh release create "$TAG" assets/* --verify-tag --title "$TAG" \
+              --notes-file notes.md "${prerelease[@]}"
+          fi
