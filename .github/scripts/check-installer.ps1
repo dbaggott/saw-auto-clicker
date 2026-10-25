@@ -1,12 +1,12 @@
-# Installs the x64 installer silently with Start at login, checks what it
-# installed, uninstalls it, and checks it is gone. Also checks that the arm64
-# installer refuses to run here. Run on an x64 Windows machine where
-# saw-auto-clicker is not installed; CI's installer job runs it on a fresh
-# runner.
+# Installs the installer silently with Start at login, checks it installed
+# the build for this machine's architecture, uninstalls it, and checks it is
+# gone. Run where saw-auto-clicker is not installed; CI's installer job runs
+# it on a fresh x64 runner and a fresh Arm64 one.
 param(
-    # A directory holding saw-auto-clicker-installer.exe for x64, as build.yml
-    # uploads it, and the arm64 one in an arm64 subdirectory.
-    [Parameter(Mandatory)] [string] $Built
+    # saw-auto-clicker-installer.exe, as build.yml uploads it.
+    [Parameter(Mandatory)] [string] $Installer,
+    # This machine's architecture, which the installed exe must be built for.
+    [Parameter(Mandatory)] [ValidateSet('x64', 'arm64')] [string] $Machine
 )
 
 $ErrorActionPreference = 'Stop'
@@ -58,18 +58,20 @@ if ($LASTEXITCODE -ne 0) { throw 'could not read the workspace version from Carg
 
 if (Test-Path $installDir) { throw "$installDir already exists; run this where saw-auto-clicker is not installed" }
 
-Write-Host '== the arm64 installer refuses to run on x64'
-$code = Invoke-Setup (Join-Path $Built 'arm64\saw-auto-clicker-installer.exe') @(
-    '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=`"$logs\arm64-setup.log`"")
-Write-Host "exit code $code"
-if ($code -eq 0) { Fail 'the arm64 installer exited 0 on x64' }
-if (Test-Path $installDir) { Fail "the arm64 installer created $installDir on x64" }
-
 Write-Host '== install silently with Start at login'
-$code = Invoke-Setup (Join-Path $Built 'saw-auto-clicker-installer.exe') @(
+$code = Invoke-Setup $Installer @(
     '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/TASKS=startatlogin', "/LOG=`"$logs\setup.log`"")
 if ($code -ne 0) { Fail "setup exited $code" }
 if (-not (Test-Path $installedExe)) { Fail "$installedExe is missing" }
+
+Write-Host "== the installed exe is the $Machine build"
+# The COFF header's Machine field, found through the PE offset at 0x3C.
+$bytes = [IO.File]::ReadAllBytes($installedExe)
+$peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
+$found = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+$expected = @{ x64 = 0x8664; arm64 = 0xAA64 }[$Machine]
+Write-Host ('Machine 0x{0:X4}' -f $found)
+if ($found -ne $expected) { Fail ('expected Machine 0x{0:X4}' -f $expected) }
 
 Write-Host '== the installed exe reports the workspace version'
 # Redirected, because a GUI-subsystem program has no console to print to.

@@ -54,24 +54,29 @@ jobs:
   build:
     uses: ./.github/workflows/build.yml
 
-  # Installs and uninstalls the x64 installer CI just built, the bytes a
-  # release would publish. Gates the release as well as merges, so a broken
-  # installer never ships.
+  # Installs and uninstalls the installer CI just built, the bytes a release
+  # would publish, on x64 and on Arm64 Windows, checking each gets its own
+  # build. Gates the release as well as merges, so a broken installer never
+  # ships.
   installer:
     needs: build
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            machine: x64
+          - runner: windows-11-arm
+            machine: arm64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
-          name: saw-x86_64-pc-windows-msvc
+          name: saw-installer
           path: built
-      - uses: actions/download-artifact@v8
-        with:
-          name: saw-aarch64-pc-windows-msvc
-          path: built/arm64
-      - run: ./.github/scripts/check-installer.ps1 -Built built
+      - run: ./.github/scripts/check-installer.ps1 -Installer built/saw-auto-clicker-installer.exe -Machine ${{ matrix.machine }}
 
   # Third-party actions on the site's path to the publish role are pinned to
   # commit SHAs: this repo is public, and a moved tag would run someone else's
