@@ -89,7 +89,7 @@ jobs:
           cat > notes.md <<NOTES
           Download and run \`saw-auto-clicker-$TAG-installer.exe\`. It installs the build for your PC, whether Intel, AMD or Windows on ARM.
 
-          For full installation directions, see the [README](https://github.com/$GH_REPO/blob/$TAG/README.md#download-and-install).
+          For full installation directions, see the [README](https://github.com/$GH_REPO/blob/$TAG/README.md#install).
           NOTES
           prerelease=()
           [[ $TAG == *-* ]] && prerelease=(--prerelease)

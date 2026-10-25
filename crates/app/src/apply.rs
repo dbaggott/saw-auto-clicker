@@ -56,7 +56,10 @@ fn refusal(requested: Option<Hotkey>, error: &HotkeyError, active: Option<Hotkey
         (Some(requested), HotkeyError::Failed(reason)) => {
             format!("{requested} could not be registered: {reason}")
         }
-        (None, e) => format!("The hotkey could not be turned off: {e}"),
+        (None, HotkeyError::Failed(reason)) => {
+            format!("The hotkey could not be turned off: {reason}")
+        }
+        (None, e @ HotkeyError::Taken) => format!("The hotkey could not be turned off: {e}"),
     };
     match active {
         Some(active) => format!("{what}. The hotkey is still {}.", HotkeyText(active)),
@@ -205,8 +208,8 @@ mod tests {
         assert_eq!(
             applied.hotkey_problem.as_deref(),
             Some(
-                "The hotkey could not be turned off: the hotkey could not be registered: \
-                 the hotkey thread has exited. The hotkey is still Ctrl+Alt+F8."
+                "The hotkey could not be turned off: the hotkey thread has exited. \
+                 The hotkey is still Ctrl+Alt+F8."
             )
         );
     }
