@@ -1,11 +1,11 @@
 name: Release
 
 # Called by CI on a push to main whose workspace version has no release yet.
-# Checks that the x64 app CI built for that commit launches, then publishes a
-# GitHub release tagged v<version> at the commit, with the installer attached
-# and the version's CHANGELOG.md section as its notes; CI's installer job has
-# already installed and uninstalled it on x64 and Arm64. A version with a
-# hyphen, such as 0.2.0-rc.1, is a pre-release.
+# Publishes a GitHub release tagged v<version> at the commit, with the
+# installer CI built attached and the version's CHANGELOG.md section as its
+# notes. CI's installer job has already installed it on x64 and Arm64 and
+# checked the installed app reports the version. A version with a hyphen, such
+# as 0.2.0-rc.1, is a pre-release.
 on:
   workflow_call:
     inputs:
@@ -18,32 +18,7 @@ permissions:
   contents: read
 
 jobs:
-  # Runs the exact x64 app the release's installer carries. Bash, because it waits
-  # for any child and reports its exit code; PowerShell skips the wait for a
-  # GUI-subsystem program unless its output is piped.
-  smoke-x64:
-    runs-on: windows-latest
-    timeout-minutes: 10
-    defaults:
-      run:
-        shell: bash
-    env:
-      TAG: ${{ inputs.tag }}
-    steps:
-      - uses: actions/download-artifact@v8
-        with:
-          name: saw-x86_64-pc-windows-msvc
-      # The runner's bash runs with -e, so each exit code is read with `||`.
-      - name: saw-app --version exits 0 and reports the version
-        run: |
-          status=0
-          out=$(./saw-app.exe --version) || status=$?
-          echo "exit code $status, stdout: $out"
-          test "$status" -eq 0
-          test "$out" = "saw-app ${TAG#v}"
-
   release:
-    needs: smoke-x64
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

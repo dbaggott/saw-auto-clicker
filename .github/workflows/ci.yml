@@ -50,6 +50,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test -p saw-core --locked
+      # Here rather than on Windows, where checkout's CRLF line endings would
+      # break the script. Fails a version bump with no CHANGELOG.md section
+      # before merge, rather than in the release after it.
+      - name: CHANGELOG.md has notes for the workspace version
+        run: |
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
+          .github/scripts/release-notes.sh "v$version" "$GITHUB_REPOSITORY"
 
   build:
     uses: ./.github/workflows/build.yml
@@ -77,21 +84,6 @@ jobs:
           name: saw-installer
           path: built
       - run: ./.github/scripts/check-installer.ps1 -Installer built/saw-auto-clicker-installer.exe -Machine ${{ matrix.machine }}
-
-  # Fails a version bump that has no CHANGELOG.md section, which the release
-  # would otherwise only find after the merge.
-  changelog:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v7
-      - name: CHANGELOG.md has notes for the workspace version
-        env:
-          GH_REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
-          .github/scripts/release-notes.sh "v$version" "$GH_REPO"
 
   # Third-party actions on the site's path to the publish role are pinned to
   # commit SHAs: this repo is public, and a moved tag would run someone else's
@@ -198,7 +190,7 @@ jobs:
           fi
 
   release:
-    needs: [release-check, test, macos, build, installer, changelog]
+    needs: [release-check, test, macos, build, installer]
     if: needs.release-check.outputs.unreleased == 'true'
     uses: ./.github/workflows/release.yml
     permissions:
@@ -214,7 +206,7 @@ jobs:
   # only after a merge, so they are left out.
   ci-required:
     if: always()
-    needs: [test, macos, build, installer, changelog, site, publish-site]
+    needs: [test, macos, build, installer, site, publish-site]
     runs-on: ubuntu-latest
     steps:
       - name: Verify every required job succeeded
