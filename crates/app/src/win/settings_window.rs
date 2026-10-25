@@ -205,6 +205,9 @@ impl Window<'_> {
                 self.applied = true;
                 // A refused hotkey shows the one still in effect.
                 self.draft = Draft::from(&self.app.settings);
+                if let Some(hotkey) = self.draft.hotkey {
+                    self.modifiers = hotkey.modifiers;
+                }
             }
             Err(why) => {
                 self.apply_problem = Some(why);

@@ -34,9 +34,6 @@ pub fn apply(
             hotkey_problem: None,
         },
         Err(e) => {
-            let refused = requested
-                .hotkey()
-                .expect("registering no hotkey is never refused");
             let kept = Settings::new(
                 requested.cps(),
                 requested.activation_delay(),
@@ -47,17 +44,19 @@ pub fn apply(
             Applied {
                 settings: kept,
                 active_hotkey,
-                hotkey_problem: Some(refusal(refused, &e, active_hotkey)),
+                hotkey_problem: Some(refusal(requested.hotkey(), &e, active_hotkey)),
             }
         }
     }
 }
 
-fn refusal(requested: Hotkey, error: &HotkeyError, active: Option<Hotkey>) -> String {
-    let requested = HotkeyText(requested);
-    let what = match error {
-        HotkeyError::Taken => format!("{requested} is in use by another app"),
-        HotkeyError::Failed(reason) => format!("{requested} could not be registered: {reason}"),
+fn refusal(requested: Option<Hotkey>, error: &HotkeyError, active: Option<Hotkey>) -> String {
+    let what = match (requested.map(HotkeyText), error) {
+        (Some(requested), HotkeyError::Taken) => format!("{requested} is in use by another app"),
+        (Some(requested), HotkeyError::Failed(reason)) => {
+            format!("{requested} could not be registered: {reason}")
+        }
+        (None, e) => format!("The hotkey could not be turned off: {e}"),
     };
     match active {
         Some(active) => format!("{what}. The hotkey is still {}.", HotkeyText(active)),
@@ -183,6 +182,32 @@ mod tests {
         assert_eq!(
             applied.hotkey_problem.as_deref(),
             Some("Ctrl+Alt+F8 is in use by another app. No hotkey is active.")
+        );
+    }
+
+    #[test]
+    fn a_refused_removal_keeps_the_active_hotkey() {
+        struct Refuses;
+        impl RegisterHotkey for Refuses {
+            fn register(&mut self, _: Option<Hotkey>) -> Result<(), HotkeyError> {
+                Err(HotkeyError::Failed("the hotkey thread has exited".into()))
+            }
+        }
+        let current = settings(10, ctrl_alt(Key::F8));
+        let applied = apply(
+            &current,
+            Some(ctrl_alt(Key::F8)),
+            Settings::default(),
+            &mut Refuses,
+        );
+        assert_eq!(applied.settings.hotkey(), Some(ctrl_alt(Key::F8)));
+        assert_eq!(applied.active_hotkey, Some(ctrl_alt(Key::F8)));
+        assert_eq!(
+            applied.hotkey_problem.as_deref(),
+            Some(
+                "The hotkey could not be turned off: the hotkey could not be registered: \
+                 the hotkey thread has exited. The hotkey is still Ctrl+Alt+F8."
+            )
         );
     }
 

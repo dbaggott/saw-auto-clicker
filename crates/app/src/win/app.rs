@@ -92,9 +92,9 @@ impl App {
         let config_path = config::default_path();
         let loaded = match &config_path {
             Some(path) => config::load(path),
-            None => {
-                config::Loaded::defaults("APPDATA is not set, so settings can't be saved".into())
-            }
+            None => config::Loaded::defaults(Some(
+                "APPDATA is not set, so settings can't be saved".into(),
+            )),
         };
         let (events_tx, events) = mpsc::channel();
         let to_main = ToMain {

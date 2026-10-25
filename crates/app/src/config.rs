@@ -59,14 +59,13 @@ pub struct Loaded {
 }
 
 impl Loaded {
-    /// Every default, for a file that exists but could not be used or for
-    /// no file path at all, saying why.
-    pub fn defaults(problem: String) -> Loaded {
+    /// Every default, with why they replaced the file if they did.
+    pub fn defaults(problem: Option<String>) -> Loaded {
         Loaded {
             settings: Settings::default(),
             arm_on_startup: false,
             first_run: false,
-            problem: Some(problem),
+            problem,
         }
     }
 }
@@ -79,10 +78,8 @@ pub fn load(path: &Path) -> Loaded {
         Ok(text) => text,
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
             return Loaded {
-                settings: Settings::default(),
-                arm_on_startup: false,
                 first_run: true,
-                problem: None,
+                ..Loaded::defaults(None)
             };
         }
         Err(e) => return defaults_because(format!("{} could not be read: {e}", path.display())),
@@ -94,7 +91,7 @@ pub fn load(path: &Path) -> Loaded {
 }
 
 fn defaults_because(problem: String) -> Loaded {
-    Loaded::defaults(format!("{problem}; using the defaults"))
+    Loaded::defaults(Some(format!("{problem}; using the defaults")))
 }
 
 fn from_file(file: FileIn) -> Loaded {
