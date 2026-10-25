@@ -6,11 +6,12 @@
 use std::time::Duration;
 
 use eframe::egui;
-use saw_core::CPS_RANGE;
+use saw_core::{CPS_RANGE, Hotkey, Key, Modifiers};
 
 use crate::form::{self, Draft};
 use crate::hotkey_text::{self, KEYS, key_name};
 use crate::icon;
+use crate::status::hotkey_missing;
 use crate::win::app::{App, Next};
 
 /// How often the open window checks for tray clicks and the clicker's
@@ -23,7 +24,7 @@ const POLL: Duration = Duration::from_millis(100);
 pub fn show(app: &mut App, close_after_frames: Option<u32>) -> Result<Next, String> {
     let viewport = egui::ViewportBuilder::default()
         .with_title("saw-auto-clicker settings")
-        .with_inner_size([400.0, 330.0])
+        .with_inner_size([400.0, 360.0])
         .with_resizable(false)
         .with_minimize_button(false)
         .with_maximize_button(false)
@@ -39,6 +40,16 @@ pub fn show(app: &mut App, close_after_frames: Option<u32>) -> Result<Next, Stri
     };
     let mut next = Next::Wait;
     let draft = Draft::from(&app.settings);
+    let arm_on_startup = app.arm_on_startup;
+    let modifiers = draft.hotkey.map_or(
+        // What a newly chosen key starts with.
+        Modifiers {
+            ctrl: true,
+            alt: true,
+            ..Modifiers::default()
+        },
+        |h| h.modifiers,
+    );
     eframe::run_native(
         "saw-auto-clicker",
         options,
@@ -46,6 +57,8 @@ pub fn show(app: &mut App, close_after_frames: Option<u32>) -> Result<Next, Stri
             Ok(Box::new(Window {
                 app,
                 draft,
+                modifiers,
+                arm_on_startup,
                 applied: false,
                 apply_problem: None,
                 next: &mut next,
@@ -60,7 +73,11 @@ pub fn show(app: &mut App, close_after_frames: Option<u32>) -> Result<Next, Stri
 
 struct Window<'a> {
     app: &'a mut App,
+    /// Its hotkey is `None` while no key is chosen.
     draft: Draft,
+    /// The hotkey's modifiers as ticked, kept while no key is chosen.
+    modifiers: Modifiers,
+    arm_on_startup: bool,
     /// Whether the last Apply went through, for its confirmation line.
     applied: bool,
     /// Why the last Apply was refused before reaching the app.
@@ -111,27 +128,37 @@ impl Window<'_> {
                 ui.end_row();
                 ui.label("Toggle hotkey");
                 ui.horizontal(|ui| {
-                    let m = &mut d.hotkey.modifiers;
-                    ui.checkbox(&mut m.ctrl, "Ctrl");
-                    ui.checkbox(&mut m.alt, "Alt");
-                    ui.checkbox(&mut m.shift, "Shift");
-                    ui.checkbox(&mut m.meta, "Win");
+                    let mut key: Option<Key> = d.hotkey.map(|h| h.key);
+                    let m = &mut self.modifiers;
+                    ui.add_enabled_ui(key.is_some(), |ui| {
+                        ui.checkbox(&mut m.ctrl, "Ctrl");
+                        ui.checkbox(&mut m.alt, "Alt");
+                        ui.checkbox(&mut m.shift, "Shift");
+                        ui.checkbox(&mut m.meta, "Win");
+                    });
                     egui::ComboBox::from_id_salt("key")
                         .width(56.0)
-                        .selected_text(key_name(d.hotkey.key))
+                        .selected_text(key.map_or("None", key_name))
                         .show_ui(ui, |ui| {
-                            for (key, name) in KEYS {
-                                ui.selectable_value(&mut d.hotkey.key, key, name);
+                            ui.selectable_value(&mut key, None, "None");
+                            for (k, name) in KEYS {
+                                ui.selectable_value(&mut key, Some(k), name);
                             }
                         });
+                    d.hotkey = key.map(|key| Hotkey { modifiers: *m, key });
                 });
+                ui.end_row();
+                ui.label("Arm on startup");
+                ui.checkbox(&mut self.arm_on_startup, "");
                 ui.end_row();
             });
 
         ui.add_space(12.0);
-        let changed = self.draft != Draft::from(&self.app.settings);
-        // With no hotkey active, applying unchanged settings retries it.
-        let can_apply = changed || self.app.active_hotkey.is_none();
+        let changed = self.draft != Draft::from(&self.app.settings)
+            || self.arm_on_startup != self.app.arm_on_startup;
+        // With the chosen hotkey refused, applying unchanged settings retries
+        // it.
+        let can_apply = changed || hotkey_missing(&self.app.settings, self.app.active_hotkey);
         ui.horizontal(|ui| {
             if ui
                 .add_enabled(can_apply, egui::Button::new("Apply"))
@@ -166,15 +193,21 @@ impl Window<'_> {
     }
 
     fn apply(&mut self) {
-        let checked = hotkey_text::usable(self.draft.hotkey)
-            .and_then(|_| self.draft.to_settings().map_err(|e| e.to_string()));
+        let checked = self
+            .draft
+            .hotkey
+            .map_or(Ok(()), |h| hotkey_text::usable(h).map(|_| ()))
+            .and_then(|()| self.draft.to_settings().map_err(|e| e.to_string()));
         match checked {
             Ok(settings) => {
-                self.app.apply_settings(settings);
+                self.app.apply_settings(settings, self.arm_on_startup);
                 self.apply_problem = None;
                 self.applied = true;
                 // A refused hotkey shows the one still in effect.
                 self.draft = Draft::from(&self.app.settings);
+                if let Some(hotkey) = self.draft.hotkey {
+                    self.modifiers = hotkey.modifiers;
+                }
             }
             Err(why) => {
                 self.apply_problem = Some(why);

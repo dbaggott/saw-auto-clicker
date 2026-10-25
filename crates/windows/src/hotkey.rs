@@ -24,7 +24,7 @@ type Reply = mpsc::SyncSender<Result<(), HotkeyError>>;
 
 /// The request `register` hands the thread. One slot is enough, because
 /// `register` takes `&mut self` and waits for its answer.
-type Pending = Arc<Mutex<Option<(Hotkey, Reply)>>>;
+type Pending = Arc<Mutex<Option<(Option<Hotkey>, Reply)>>>;
 
 /// Owns the hotkey thread, where each press toggles armed. Registration runs
 /// on that thread, because `RegisterHotKey` without a window posts to the
@@ -83,7 +83,7 @@ impl HotkeyThread {
 }
 
 impl RegisterHotkey for HotkeyThread {
-    fn register(&mut self, hotkey: Hotkey) -> Result<(), HotkeyError> {
+    fn register(&mut self, hotkey: Option<Hotkey>) -> Result<(), HotkeyError> {
         let gone = || HotkeyError::Failed("the hotkey thread has exited".into());
         let (reply, answer) = mpsc::sync_channel(1);
         *self.pending.lock().unwrap_or_else(PoisonError::into_inner) = Some((hotkey, reply));
@@ -110,7 +110,7 @@ impl Drop for HotkeyThread {
     }
 }
 
-fn take(pending: &Pending) -> Option<(Hotkey, Reply)> {
+fn take(pending: &Pending) -> Option<(Option<Hotkey>, Reply)> {
     // The slot is a plain Option, so a panic elsewhere can't leave it
     // inconsistent.
     pending
@@ -231,8 +231,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_default_hotkey_is_ctrl_alt_f8_without_repeat() {
-        let (modifiers, key) = win32_combination(Hotkey::default());
+    fn ctrl_alt_f8_maps_without_repeat() {
+        let (modifiers, key) = win32_combination(Hotkey {
+            modifiers: Modifiers {
+                ctrl: true,
+                alt: true,
+                ..Modifiers::default()
+            },
+            key: Key::F8,
+        });
         assert_eq!(modifiers, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT);
         assert_eq!(key, VK_F8);
     }

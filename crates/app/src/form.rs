@@ -26,7 +26,7 @@ pub struct Draft {
     pub cps: u32,
     pub delay_ms: u32,
     pub jitter_percent: u32,
-    pub hotkey: Hotkey,
+    pub hotkey: Option<Hotkey>,
 }
 
 impl From<&Settings> for Draft {
@@ -63,13 +63,13 @@ mod tests {
             cps: 50,
             delay_ms: 2000,
             jitter_percent: 50,
-            hotkey: Hotkey {
+            hotkey: Some(Hotkey {
                 modifiers: Modifiers {
                     shift: true,
                     ..Modifiers::default()
                 },
                 key: Key::Digit7,
-            },
+            }),
         };
         assert_eq!(Draft::from(&draft.to_settings().unwrap()), draft);
         assert_eq!(

@@ -102,7 +102,7 @@ fn a_held_button_auto_clicks_through_the_real_hook() {
     let _target = TargetWindow::under_cursor();
     let observed = Arc::new(Mutex::new(Vec::<(ButtonEvent, Verdict)>::new()));
     let log = Arc::clone(&observed);
-    let settings = Settings::new(20, Duration::from_millis(100), 0.0, Hotkey::default()).unwrap();
+    let settings = Settings::new(20, Duration::from_millis(100), 0.0, None).unwrap();
     let clicker = Clicker::start(
         settings,
         ThrottlingOptOuts::default(),
@@ -219,14 +219,17 @@ fn a_taken_hotkey_is_refused_and_the_previous_one_keeps_working() {
     .unwrap();
     let mut hotkeys = HotkeyThread::spawn(scheduler.controller()).unwrap();
 
-    hotkeys.register(ctrl_alt_shift(Key::F21)).unwrap();
+    hotkeys.register(Some(ctrl_alt_shift(Key::F21))).unwrap();
     assert!(held_elsewhere(VK_F21.0));
     assert_eq!(
-        hotkeys.register(ctrl_alt_shift(Key::F20)),
+        hotkeys.register(Some(ctrl_alt_shift(Key::F20))),
         Err(HotkeyError::Taken)
     );
     assert!(held_elsewhere(VK_F21.0), "the previous hotkey was dropped");
 
+    hotkeys.register(None).unwrap();
+    assert!(!held_elsewhere(VK_F21.0), "None did not unregister");
+    hotkeys.register(Some(ctrl_alt_shift(Key::F21))).unwrap();
     drop(hotkeys);
     assert!(!held_elsewhere(VK_F21.0), "dropping did not unregister");
     stop_tx.send(()).unwrap();

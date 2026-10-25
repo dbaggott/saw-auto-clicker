@@ -1,29 +1,24 @@
-; The per-user installer for one architecture. CI compiles it once per build
-; target (.github/workflows/build.yml):
+; The per-user installer, carrying both builds of the app and installing the
+; one native to the machine. CI compiles it once from both build targets
+; (.github/workflows/build.yml):
 ;
-;   iscc /DAppVersion=<version> /DArch=x64|arm64 /DAppExe=<path to saw-app.exe>
+;   iscc /DAppVersion=<version> /DAppExeX64=<path to the x64 saw-app.exe>
+;        /DAppExeArm64=<path to the arm64 saw-app.exe>
 ;        /O<output dir> /Fsaw-auto-clicker-installer installer\saw-auto-clicker.iss
 
 #ifndef AppVersion
   #error Pass the version: /DAppVersion=<workspace version>
 #endif
-#ifndef AppExe
-  #error Pass the app: /DAppExe=<path to saw-app.exe>
+#ifndef AppExeX64
+  #error Pass the x64 app: /DAppExeX64=<path to saw-app.exe>
 #endif
-#ifndef Arch
-  #error Pass the architecture: /DArch=x64 or /DArch=arm64
+#ifndef AppExeArm64
+  #error Pass the arm64 app: /DAppExeArm64=<path to saw-app.exe>
 #endif
 
-; Each installer runs only on the architecture its exe was built for. x64os
-; leaves out Windows on ARM, where the x64 build would run under emulation
-; when a native build exists.
-#if Arch == "x64"
-  #define Architecture "x64os"
-#elif Arch == "arm64"
-  #define Architecture "arm64"
-#else
-  #error Arch must be x64 or arm64
-#endif
+; x64os leaves out Windows on ARM, which could run the x64 build only under
+; emulation; it gets the arm64 build instead.
+#define Architectures "x64os arm64"
 
 #define AppName "saw-auto-clicker"
 ; A stable name, so an upgrade replaces the exe in place and the start-at-login
@@ -35,8 +30,8 @@
 #define RunValue "saw-auto-clicker"
 
 [Setup]
-; One AppId for both architectures, so installing either upgrades whichever
-; is already there rather than adding a second entry.
+; The AppId the earlier per-architecture installers shared, so this one
+; upgrades either of them in place.
 AppId={{D675A522-B891-431A-ABDF-927F9B5987FD}
 AppName={#AppName}
 AppVersion={#AppVersion}
@@ -49,8 +44,8 @@ DisableProgramGroupPage=yes
 ; Start at login stays unticked on an upgrade too, so reinstalling never turns
 ; back on what the user turned off in the tray menu.
 UsePreviousTasks=no
-ArchitecturesAllowed={#Architecture}
-ArchitecturesInstallIn64BitMode={#Architecture}
+ArchitecturesAllowed={#Architectures}
+ArchitecturesInstallIn64BitMode={#Architectures}
 ; The app's single-instance mutex (crates/app/src/win/instance.rs): setup and
 ; uninstall ask the user to quit a running copy first.
 AppMutex=Local\saw-auto-clicker
@@ -65,7 +60,9 @@ SolidCompression=yes
 Name: startatlogin; Description: "Start at login"; Flags: unchecked
 
 [Files]
-Source: "{#AppExe}"; DestDir: "{app}"; DestName: "{#AppExeName}"; Flags: ignoreversion
+; Only x64os and arm64 are allowed, so a machine that is not Arm64 is x64.
+Source: "{#AppExeX64}"; DestDir: "{app}"; DestName: "{#AppExeName}"; Check: not IsArm64; Flags: ignoreversion
+Source: "{#AppExeArm64}"; DestDir: "{app}"; DestName: "{#AppExeName}"; Check: IsArm64; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"

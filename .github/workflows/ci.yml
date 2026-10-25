@@ -50,33 +50,48 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test -p saw-core --locked
+      # Here rather than on Windows, where checkout's CRLF line endings would
+      # break the script. Fails a version bump with no CHANGELOG.md section
+      # before merge, rather than in the release after it.
+      - name: CHANGELOG.md has notes for the workspace version
+        run: |
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
+          .github/scripts/release-notes.sh "v$version" "$GITHUB_REPOSITORY"
 
+  # Every artifact is built only once every test has passed.
   build:
+    needs: [test, macos]
     uses: ./.github/workflows/build.yml
 
-  # Installs and uninstalls the x64 installer CI just built, the bytes a
-  # release would publish. Gates the release as well as merges, so a broken
-  # installer never ships.
+  # Installs and uninstalls the installer CI just built, the bytes a release
+  # would publish, on x64 and on Arm64 Windows, checking each gets its own
+  # build. Gates the release as well as merges, so a broken installer never
+  # ships.
   installer:
     needs: build
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            machine: x64
+          - runner: windows-11-arm
+            machine: arm64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
-          name: saw-x86_64-pc-windows-msvc
+          name: saw-installer
           path: built
-      - uses: actions/download-artifact@v8
-        with:
-          name: saw-aarch64-pc-windows-msvc
-          path: built/arm64
-      - run: ./.github/scripts/check-installer.ps1 -Built built
+      - run: ./.github/scripts/check-installer.ps1 -Installer built/saw-auto-clicker-installer.exe -Machine ${{ matrix.machine }}
 
   # Third-party actions on the site's path to the publish role are pinned to
   # commit SHAs: this repo is public, and a moved tag would run someone else's
   # code with what that role can write.
   site:
+    needs: [test, macos]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:

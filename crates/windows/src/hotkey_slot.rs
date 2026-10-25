@@ -35,7 +35,13 @@ impl<T: HotkeyTable> HotkeySlot<T> {
         self.current.is_some_and(|(current, _)| current == id)
     }
 
-    pub(crate) fn change(&mut self, hotkey: Hotkey) -> Result<(), HotkeyError> {
+    /// Replaces the current hotkey with `hotkey`, or with `None` unregisters
+    /// it.
+    pub(crate) fn change(&mut self, hotkey: Option<Hotkey>) -> Result<(), HotkeyError> {
+        let Some(hotkey) = hotkey else {
+            self.clear();
+            return Ok(());
+        };
         // Registering a combination this slot already holds would fail as
         // taken, by itself.
         if self.current.is_some_and(|(_, current)| current == hotkey) {
@@ -111,8 +117,8 @@ mod tests {
     #[test]
     fn a_change_registers_the_new_hotkey_before_unregistering_the_old() {
         let mut slot = HotkeySlot::new(FakeTable::default());
-        slot.change(ctrl_alt(Key::F8)).unwrap();
-        slot.change(ctrl_alt(Key::F9)).unwrap();
+        slot.change(Some(ctrl_alt(Key::F8))).unwrap();
+        slot.change(Some(ctrl_alt(Key::F9))).unwrap();
         assert_eq!(
             slot.table.calls,
             [
@@ -131,8 +137,11 @@ mod tests {
             taken: vec![ctrl_alt(Key::F9)],
             ..FakeTable::default()
         });
-        slot.change(ctrl_alt(Key::F8)).unwrap();
-        assert_eq!(slot.change(ctrl_alt(Key::F9)), Err(HotkeyError::Taken));
+        slot.change(Some(ctrl_alt(Key::F8))).unwrap();
+        assert_eq!(
+            slot.change(Some(ctrl_alt(Key::F9))),
+            Err(HotkeyError::Taken)
+        );
         assert_eq!(slot.table.ours, HashMap::from([(1, ctrl_alt(Key::F8))]));
         assert!(slot.is_current(1));
         assert!(
@@ -140,7 +149,7 @@ mod tests {
             "{:?}",
             slot.table.calls
         );
-        slot.change(ctrl_alt(Key::F10)).unwrap();
+        slot.change(Some(ctrl_alt(Key::F10))).unwrap();
         assert_eq!(slot.table.ours, HashMap::from([(2, ctrl_alt(Key::F10))]));
     }
 
@@ -150,7 +159,10 @@ mod tests {
             taken: vec![ctrl_alt(Key::F8)],
             ..FakeTable::default()
         });
-        assert_eq!(slot.change(ctrl_alt(Key::F8)), Err(HotkeyError::Taken));
+        assert_eq!(
+            slot.change(Some(ctrl_alt(Key::F8))),
+            Err(HotkeyError::Taken)
+        );
         assert!(!slot.is_current(1) && !slot.is_current(2));
     }
 
@@ -158,7 +170,7 @@ mod tests {
     fn a_replaced_hotkeys_id_is_not_reused_by_the_next_change() {
         let mut slot = HotkeySlot::new(FakeTable::default());
         for key in [Key::F8, Key::F9, Key::F10] {
-            slot.change(ctrl_alt(key)).unwrap();
+            slot.change(Some(ctrl_alt(key))).unwrap();
         }
         assert!(slot.is_current(3));
         assert!(!slot.is_current(1) && !slot.is_current(2));
@@ -168,22 +180,33 @@ mod tests {
     fn ids_wrap_within_the_application_range() {
         let mut slot = HotkeySlot::new(FakeTable::default());
         slot.last_id = MAX_ID;
-        slot.change(ctrl_alt(Key::F8)).unwrap();
+        slot.change(Some(ctrl_alt(Key::F8))).unwrap();
         assert!(slot.is_current(1));
     }
 
     #[test]
     fn changing_to_the_current_hotkey_does_nothing() {
         let mut slot = HotkeySlot::new(FakeTable::default());
-        slot.change(ctrl_alt(Key::F8)).unwrap();
-        slot.change(ctrl_alt(Key::F8)).unwrap();
+        slot.change(Some(ctrl_alt(Key::F8))).unwrap();
+        slot.change(Some(ctrl_alt(Key::F8))).unwrap();
         assert_eq!(slot.table.calls, [Call::Register(1, ctrl_alt(Key::F8))]);
+    }
+
+    #[test]
+    fn changing_to_none_unregisters_the_current_hotkey() {
+        let mut slot = HotkeySlot::new(FakeTable::default());
+        slot.change(Some(ctrl_alt(Key::F8))).unwrap();
+        slot.change(None).unwrap();
+        assert!(slot.table.ours.is_empty());
+        assert!(!slot.is_current(1));
+        slot.change(Some(ctrl_alt(Key::F8))).unwrap();
+        assert!(slot.is_current(2));
     }
 
     #[test]
     fn clear_unregisters_the_current_hotkey() {
         let mut slot = HotkeySlot::new(FakeTable::default());
-        slot.change(ctrl_alt(Key::F8)).unwrap();
+        slot.change(Some(ctrl_alt(Key::F8))).unwrap();
         slot.clear();
         assert!(slot.table.ours.is_empty());
         slot.clear();

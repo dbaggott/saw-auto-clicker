@@ -18,7 +18,7 @@ pub struct Settings {
     cps: u32,
     activation_delay: Duration,
     jitter: f64,
-    hotkey: Hotkey,
+    hotkey: Option<Hotkey>,
 }
 
 impl Settings {
@@ -26,7 +26,7 @@ impl Settings {
         cps: u32,
         activation_delay: Duration,
         jitter: f64,
-        hotkey: Hotkey,
+        hotkey: Option<Hotkey>,
     ) -> Result<Settings, SettingsError> {
         if !CPS_RANGE.contains(&cps) {
             return Err(SettingsError::Cps(cps));
@@ -57,7 +57,8 @@ impl Settings {
         self.jitter
     }
 
-    pub fn hotkey(&self) -> Hotkey {
+    /// The toggle hotkey, or `None` when the user has not chosen one (Q3).
+    pub fn hotkey(&self) -> Option<Hotkey> {
         self.hotkey
     }
 
@@ -73,7 +74,7 @@ impl Default for Settings {
             cps: 10,
             activation_delay: Duration::from_millis(250),
             jitter: 0.0,
-            hotkey: Hotkey::default(),
+            hotkey: None,
         }
     }
 }
@@ -120,20 +121,6 @@ impl std::error::Error for SettingsError {}
 pub struct Hotkey {
     pub modifiers: Modifiers,
     pub key: Key,
-}
-
-/// Ctrl+Alt+F8 (Q3).
-impl Default for Hotkey {
-    fn default() -> Hotkey {
-        Hotkey {
-            modifiers: Modifiers {
-                ctrl: true,
-                alt: true,
-                ..Modifiers::default()
-            },
-            key: Key::F8,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -223,24 +210,13 @@ mod tests {
         assert_eq!(s.cps(), 10);
         assert_eq!(s.activation_delay(), ms(250));
         assert_eq!(s.jitter(), 0.0);
-        assert_eq!(
-            s.hotkey(),
-            Hotkey {
-                modifiers: Modifiers {
-                    ctrl: true,
-                    alt: true,
-                    shift: false,
-                    meta: false
-                },
-                key: Key::F8,
-            }
-        );
+        assert_eq!(s.hotkey(), None);
         assert_eq!(s.interval(), ms(100));
     }
 
     #[test]
     fn range_ends_are_accepted() {
-        let hk = Hotkey::default();
+        let hk = None;
         for (cps, delay, jitter) in [(1, 50, 0.0), (50, 2000, 0.5)] {
             let s = Settings::new(cps, ms(delay), jitter, hk).unwrap();
             assert_eq!(
@@ -252,7 +228,7 @@ mod tests {
 
     #[test]
     fn out_of_range_values_are_rejected() {
-        let hk = Hotkey::default();
+        let hk = None;
         assert_eq!(
             Settings::new(0, ms(250), 0.0, hk),
             Err(SettingsError::Cps(0))

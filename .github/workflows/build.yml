@@ -1,8 +1,8 @@
 name: Build
 
-# The release build of both binaries, and the app's installer, for each
-# Windows target. On main, the release workflow publishes these same
-# installers, so what CI built is what ships.
+# The release build of both binaries for each Windows target, and the one
+# installer that carries both targets' app. On main, the release workflow
+# publishes this same installer, so what CI built is what ships.
 on:
   workflow_call:
 
@@ -15,13 +15,10 @@ env:
 jobs:
   build:
     strategy:
-      fail-fast: false
+      # All targets or none: one failing cancels the rest.
+      fail-fast: true
       matrix:
-        include:
-          - target: x86_64-pc-windows-msvc
-            arch: x64
-          - target: aarch64-pc-windows-msvc
-            arch: arm64
+        target: [x86_64-pc-windows-msvc, aarch64-pc-windows-msvc]
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -31,25 +28,40 @@ jobs:
         with:
           key: ${{ matrix.target }}
       - run: cargo build --workspace --release --locked --target ${{ matrix.target }}
-      # Untagged: a pull request has no release tag, so the release names the
-      # installer when it publishes it. Written beside the binaries so the
-      # artifact keeps all three at its top level.
-      - name: Build the installer
-        env:
-          TARGET: ${{ matrix.target }}
-          ARCH: ${{ matrix.arch }}
-        run: |
-          $version = (cargo metadata --no-deps --format-version 1 --locked | ConvertFrom-Json).packages |
-            Where-Object name -eq 'saw-app' | ForEach-Object version
-          $release = "target\$env:TARGET\release"
-          iscc "/DAppVersion=$version" "/DArch=$env:ARCH" "/DAppExe=$PWD\$release\saw-app.exe" `
-            "/O$release" /Fsaw-auto-clicker-installer installer\saw-auto-clicker.iss
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v7
         with:
           name: saw-${{ matrix.target }}
           path: |
             target/${{ matrix.target }}/release/saw-app.exe
             target/${{ matrix.target }}/release/saw-measure.exe
-            target/${{ matrix.target }}/release/saw-auto-clicker-installer.exe
+          if-no-files-found: error
+
+  installer:
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: saw-x86_64-pc-windows-msvc
+          path: built/x64
+      - uses: actions/download-artifact@v8
+        with:
+          name: saw-aarch64-pc-windows-msvc
+          path: built/arm64
+      # Untagged: a pull request has no release tag, so the release names the
+      # installer when it publishes it.
+      - name: Build the installer
+        run: |
+          $version = python -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          iscc "/DAppVersion=$version" "/DAppExeX64=$PWD\built\x64\saw-app.exe" `
+            "/DAppExeArm64=$PWD\built\arm64\saw-app.exe" `
+            /Obuilt /Fsaw-auto-clicker-installer installer\saw-auto-clicker.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v7
+        with:
+          name: saw-installer
+          path: built/saw-auto-clicker-installer.exe
           if-no-files-found: error

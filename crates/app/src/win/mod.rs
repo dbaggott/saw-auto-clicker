@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use app::{App, Persist};
 use instance::{SingleInstance, show_error, show_info};
+use saw_core::{Hotkey, Key, Modifiers, Settings};
 
 const USAGE: &str = "Usage: saw-app [--self-test | --version]";
 
@@ -57,10 +58,11 @@ fn run() -> ExitCode {
 
 /// `--self-test`: starts the whole app, waits for it to arm, opens and
 /// closes the settings window twice with the tray running, applies the
-/// settings unchanged, and quits through the same path as the tray's Quit.
-/// Reports each step on stdout and exits non-zero on the first failure. It
-/// never writes the settings file or the registry, and refuses to run while
-/// another instance is running, which it would otherwise disturb.
+/// settings with Ctrl+Alt+F8 and then as loaded, and quits through the same
+/// path as the tray's Quit. Reports each step on stdout and exits non-zero
+/// on the first failure. It never writes the settings file or the registry,
+/// and refuses to run while another instance is running, which it would
+/// otherwise disturb.
 fn self_test() -> ExitCode {
     let result = (|| {
         let _instance = SingleInstance::claim()
@@ -75,11 +77,31 @@ fn self_test() -> ExitCode {
             println!("settings window {round}: drew 30 frames and closed");
             app.handle_arrivals();
         }
-        app.apply_settings(app.settings.clone());
-        if let Some(problem) = &app.hotkey_problem {
-            // A hotkey already held elsewhere on this machine is not a fault
-            // in the app.
-            println!("note: {problem}");
+        let loaded = app.settings.clone();
+        // A hotkey of its own, since the loaded settings may have none and
+        // registering one is what the hotkey path is for.
+        let ctrl_alt_f8 = Hotkey {
+            modifiers: Modifiers {
+                ctrl: true,
+                alt: true,
+                ..Modifiers::default()
+            },
+            key: Key::F8,
+        };
+        let with_hotkey = Settings::new(
+            loaded.cps(),
+            loaded.activation_delay(),
+            loaded.jitter(),
+            Some(ctrl_alt_f8),
+        )
+        .map_err(|e| e.to_string())?;
+        for settings in [with_hotkey, loaded] {
+            app.apply_settings(settings, app.arm_on_startup);
+            if let Some(problem) = &app.hotkey_problem {
+                // A hotkey already held elsewhere on this machine is not a
+                // fault in the app.
+                println!("note: {problem}");
+            }
         }
         app.quit()?;
         println!("quit cleanly");
