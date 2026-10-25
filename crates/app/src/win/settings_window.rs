@@ -25,26 +25,17 @@ const ACCENT: egui::Color32 =
 const WIDTH: f32 = 540.0;
 const MARGIN: i8 = 16;
 
-const CPS_HELP: &str = "How fast it clicks while you hold a mouse button down, \
-from 1 to 50 clicks per second.";
-const DELAY_HELP: &str = "How long you hold a mouse button before auto-clicking \
-starts. Anything shorter is an ordinary press, so normal clicks, double-clicks \
-and quick drags still work.\n\nWhile armed, any longer hold auto-clicks, \
-including drags and text selection. Disarm first for that kind of work.";
-const JITTER_HELP: &str = "Makes the time between clicks vary at random, so \
-they aren't perfectly even. The average rate stays the same.\n\nAt 0% every \
-click is evenly spaced. At 50%, each gap can be anywhere from half to one and \
-a half times its usual length.";
-const HOTKEY_HELP: &str = "A keyboard shortcut that arms and disarms \
-auto-clicking from anywhere. Choose a key, then pick the keys to hold with \
-it. A letter or digit also needs Ctrl, Alt or Win, so the key still types \
-normally.\n\nIf another app already uses the shortcut, this window says so \
-and the previous one keeps working. With None, arm and disarm from the tray \
-icon instead.";
-const ARM_ON_STARTUP_HELP: &str = "Start armed whenever the app starts, \
-including when Windows starts it at login. When off, the app starts disarmed, \
-except the first time after it's installed: arm it with the hotkey or from \
-the tray icon.";
+const CPS_HELP: &str = "The target clicks per second when auto-clicking.";
+const DELAY_HELP: &str =
+    "The amount of time you must hold down a click before auto-clicking starts.";
+const JITTER_HELP: &str = "Adds some randomness to the time between clicks so \
+that they aren't perfectly uniform. The overall clicks per second stays the \
+same.\n\nAt 0% every click is evenly spaced. At 50%, each gap can be anywhere \
+from half to one and a half times its usual length.";
+const HOTKEY_HELP: &str = "An optional keyboard shortcut that arms and disarms auto-clicking.";
+const ARM_ON_STARTUP_HELP: &str = "By default, the app starts disarmed to prevent \
+accidental auto-clicking. Select this if you want the auto-clicker to \
+automatically arm itself on startup.";
 
 /// Shows the window until it closes, and says whether Quit was chosen from
 /// the tray meanwhile. `close_after_frames` closes it by itself once it has
