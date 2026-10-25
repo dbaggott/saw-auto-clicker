@@ -18,7 +18,7 @@ use crate::backend::{Inject, Observe};
 use crate::clock::{Clock, Time};
 use crate::gate::{Button, ButtonEvent, ButtonGate, Direction, Inbox, Source, Verdict};
 use crate::scheduler::{Input, Scheduler, Status, Wake};
-use crate::settings::{Hotkey, Settings};
+use crate::settings::Settings;
 
 pub fn ms(n: u64) -> Duration {
     Duration::from_millis(n)
@@ -37,7 +37,7 @@ pub fn at_us(n: u64) -> Time {
 }
 
 pub fn settings(cps: u32, delay_ms: u64, jitter: f64) -> Settings {
-    Settings::new(cps, ms(delay_ms), jitter, Hotkey::default()).unwrap()
+    Settings::new(cps, ms(delay_ms), jitter, None).unwrap()
 }
 
 /// An event applications received.

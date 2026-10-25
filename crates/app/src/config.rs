@@ -1,6 +1,6 @@
 //! The settings file (R14): `%APPDATA%\saw-auto-clicker\config.toml` by
-//! default, loaded at startup and written whenever the settings window
-//! applies a change or the app is armed or disarmed.
+//! default, loaded at startup and written on the first run and whenever the
+//! settings window applies a change.
 
 use saw_core::{CPS_RANGE, Settings};
 use serde::{Deserialize, Serialize};
@@ -30,7 +30,7 @@ struct FileIn {
     activation_delay_ms: Option<toml::Value>,
     jitter_percent: Option<toml::Value>,
     hotkey: Option<toml::Value>,
-    armed: Option<toml::Value>,
+    arm_on_startup: Option<toml::Value>,
 }
 
 /// The file as written.
@@ -39,44 +39,51 @@ struct FileOut {
     cps: u32,
     activation_delay_ms: u32,
     jitter_percent: u32,
+    /// Empty for no hotkey.
     hotkey: String,
-    armed: bool,
+    arm_on_startup: bool,
 }
-
-/// The armed state when the file doesn't give one, as on a first run.
-const DEFAULT_ARMED: bool = true;
 
 /// What [`load`] read.
 #[derive(Debug, PartialEq)]
 pub struct Loaded {
     pub settings: Settings,
-    /// Whether the app was armed when it last saved, so it starts the way it
-    /// was left. Armed when the file doesn't say.
-    pub armed: bool,
+    /// Whether the app arms when it starts. Off when the file doesn't say.
+    pub arm_on_startup: bool,
+    /// Whether there was no file, as on the first run after the first
+    /// install. An upgrade or reinstall keeps the file.
+    pub first_run: bool,
     /// Why some or all of the file was replaced by defaults, for the settings
     /// window to show. `None` when the file was read in full, or is missing.
     pub problem: Option<String>,
 }
 
 impl Loaded {
-    /// Every default, with why they replaced the file if they did.
-    pub fn defaults(problem: Option<String>) -> Loaded {
+    /// Every default, for a file that exists but could not be used or for
+    /// no file path at all, saying why.
+    pub fn defaults(problem: String) -> Loaded {
         Loaded {
             settings: Settings::default(),
-            armed: DEFAULT_ARMED,
-            problem,
+            arm_on_startup: false,
+            first_run: false,
+            problem: Some(problem),
         }
     }
 }
 
-/// Reads the settings and the armed state, using the default for each value
-/// that is missing or invalid (Q1–Q3's for the settings, armed for the
-/// state), and for all of them when the file is missing or isn't TOML.
+/// Reads the settings and whether to arm on startup, using the default for
+/// each value that is missing or invalid (Q1–Q3's for the settings, off for
+/// arming), and for all of them when the file is missing or isn't TOML.
 pub fn load(path: &Path) -> Loaded {
     let text = match fs::read_to_string(path) {
         Ok(text) => text,
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            return Loaded::defaults(None);
+            return Loaded {
+                settings: Settings::default(),
+                arm_on_startup: false,
+                first_run: true,
+                problem: None,
+            };
         }
         Err(e) => return defaults_because(format!("{} could not be read: {e}", path.display())),
     };
@@ -87,7 +94,7 @@ pub fn load(path: &Path) -> Loaded {
 }
 
 fn defaults_because(problem: String) -> Loaded {
-    Loaded::defaults(Some(format!("{problem}; using the defaults")))
+    Loaded::defaults(format!("{problem}; using the defaults"))
 }
 
 fn from_file(file: FileIn) -> Loaded {
@@ -118,21 +125,26 @@ fn from_file(file: FileIn) -> Loaded {
         &mut problems,
         "hotkey",
         file.hotkey.map(|v| {
-            v.as_str()
-                .ok_or_else(|| format!("must be text such as \"Ctrl+Alt+F8\", got {v}"))
-                .and_then(hotkey_text::parse)
+            let text = v.as_str().ok_or_else(|| {
+                format!("must be text such as \"Ctrl+Alt+F8\", or \"\" for none, got {v}")
+            })?;
+            if text.trim().is_empty() {
+                return Ok(None);
+            }
+            hotkey_text::parse(text)
                 .and_then(hotkey_text::usable)
+                .map(Some)
         }),
         defaults.hotkey,
     );
-    let armed = pick(
+    let arm_on_startup = pick(
         &mut problems,
-        "armed",
-        file.armed.map(|v| {
+        "arm_on_startup",
+        file.arm_on_startup.map(|v| {
             v.as_bool()
                 .ok_or_else(|| format!("must be true or false, got {v}"))
         }),
-        DEFAULT_ARMED,
+        false,
     );
     let draft = Draft {
         cps,
@@ -151,7 +163,8 @@ fn from_file(file: FileIn) -> Loaded {
     });
     Loaded {
         settings,
-        armed,
+        arm_on_startup,
+        first_run: false,
         problem,
     }
 }
@@ -185,17 +198,19 @@ fn pick<T>(
     }
 }
 
-/// Writes the settings and the armed state, creating the directory if
-/// needed. The file is replaced in one step, so a failed write leaves the
+/// Writes the settings and whether to arm on startup, creating the directory
+/// if needed. The file is replaced in one step, so a failed write leaves the
 /// previous one intact.
-pub fn save(path: &Path, settings: &Settings, armed: bool) -> io::Result<()> {
+pub fn save(path: &Path, settings: &Settings, arm_on_startup: bool) -> io::Result<()> {
     let draft = Draft::from(settings);
     let file = FileOut {
         cps: draft.cps,
         activation_delay_ms: draft.delay_ms,
         jitter_percent: draft.jitter_percent,
-        hotkey: HotkeyText(draft.hotkey).to_string(),
-        armed,
+        hotkey: draft
+            .hotkey
+            .map_or_else(String::new, |h| HotkeyText(h).to_string()),
+        arm_on_startup,
     };
     let text = toml::to_string(&file).map_err(io::Error::other)?;
     if let Some(dir) = path.parent() {
@@ -251,17 +266,18 @@ mod tests {
             },
             key: Key::K,
         };
-        Settings::new(37, Duration::from_millis(600), 0.3, hotkey).unwrap()
+        Settings::new(37, Duration::from_millis(600), 0.3, Some(hotkey)).unwrap()
     }
 
     #[test]
-    fn a_missing_file_gives_the_defaults_quietly() {
+    fn a_missing_file_is_a_first_run_with_the_defaults_quietly() {
         let dir = TempDir::new("missing");
         assert_eq!(
             load(&dir.file()),
             Loaded {
                 settings: Settings::default(),
-                armed: true,
+                arm_on_startup: false,
+                first_run: true,
                 problem: None
             }
         );
@@ -275,73 +291,87 @@ mod tests {
             load(&dir.file()),
             Loaded {
                 settings: custom(),
-                armed: true,
+                arm_on_startup: true,
+                first_run: false,
                 problem: None
             }
         );
-        save(&dir.file(), &Settings::default(), true).unwrap();
-        assert_eq!(load(&dir.file()).settings, Settings::default());
-    }
-
-    #[test]
-    fn the_armed_state_loads_back() {
-        let dir = TempDir::new("armed-round-trip");
         save(&dir.file(), &Settings::default(), false).unwrap();
-        assert!(!load(&dir.file()).armed);
-        save(&dir.file(), &Settings::default(), true).unwrap();
-        assert!(load(&dir.file()).armed);
-    }
-
-    #[test]
-    fn saving_disarmed_keeps_the_other_values() {
-        let dir = TempDir::new("disarmed-keeps");
-        save(&dir.file(), &custom(), true).unwrap();
-        let before = load(&dir.file());
-        save(&dir.file(), &before.settings, false).unwrap();
         assert_eq!(
             load(&dir.file()),
             Loaded {
-                settings: custom(),
-                armed: false,
+                settings: Settings::default(),
+                arm_on_startup: false,
+                first_run: false,
                 problem: None
             }
         );
     }
 
     #[test]
-    fn a_missing_armed_value_means_armed() {
-        let dir = TempDir::new("armed-missing");
-        write(&dir.file(), "cps = 20\n");
+    fn no_hotkey_is_written_as_empty_text() {
+        let dir = TempDir::new("no-hotkey");
+        save(&dir.file(), &Settings::default(), false).unwrap();
+        let text = fs::read_to_string(dir.file()).unwrap();
+        assert!(text.contains("hotkey = \"\""), "{text}");
+        write(&dir.file(), "hotkey = \"  \"\n");
         let loaded = load(&dir.file());
-        assert!(loaded.armed);
+        assert_eq!(loaded.settings.hotkey(), None);
         assert_eq!(loaded.problem, None);
     }
 
     #[test]
-    fn an_armed_value_that_is_not_a_boolean_means_armed_with_a_reason() {
-        let dir = TempDir::new("armed-wrong-type");
-        write(&dir.file(), "cps = 20\narmed = \"no\"\n");
+    fn a_missing_arm_on_startup_value_means_off() {
+        let dir = TempDir::new("arm-missing");
+        write(&dir.file(), "cps = 20\n");
         let loaded = load(&dir.file());
-        assert!(loaded.armed);
+        assert!(!loaded.arm_on_startup);
+        assert!(!loaded.first_run);
+        assert_eq!(loaded.problem, None);
+    }
+
+    #[test]
+    fn the_armed_state_an_older_version_saved_is_ignored() {
+        let dir = TempDir::new("old-armed");
+        write(&dir.file(), "hotkey = \"Ctrl+Alt+F8\"\narmed = true\n");
+        let loaded = load(&dir.file());
+        assert!(!loaded.arm_on_startup);
+        assert!(loaded.settings.hotkey().is_some());
+        assert_eq!(loaded.problem, None);
+    }
+
+    #[test]
+    fn an_arm_on_startup_value_that_is_not_a_boolean_means_off_with_a_reason() {
+        let dir = TempDir::new("arm-wrong-type");
+        write(&dir.file(), "cps = 20\narm_on_startup = \"yes\"\n");
+        let loaded = load(&dir.file());
+        assert!(!loaded.arm_on_startup);
         assert_eq!(loaded.settings.cps(), 20);
         let problem = loaded.problem.unwrap();
         assert!(
-            problem.contains("armed must be true or false"),
+            problem.contains("arm_on_startup must be true or false"),
             "{problem:?}"
         );
     }
 
     #[test]
+    fn a_file_that_is_not_toml_is_not_a_first_run() {
+        let dir = TempDir::new("garbage-not-first");
+        write(&dir.file(), "[[[");
+        assert!(!load(&dir.file()).first_run);
+    }
+
+    #[test]
     fn the_file_is_readable_toml() {
         let dir = TempDir::new("format");
-        save(&dir.file(), &custom(), false).unwrap();
+        save(&dir.file(), &custom(), true).unwrap();
         let text = fs::read_to_string(dir.file()).unwrap();
         for line in [
             "cps = 37",
             "activation_delay_ms = 600",
             "jitter_percent = 30",
             "hotkey = \"Shift+Win+K\"",
-            "armed = false",
+            "arm_on_startup = true",
         ] {
             assert!(text.contains(line), "{line:?} missing from:\n{text}");
         }
@@ -417,7 +447,8 @@ mod tests {
             load(&dir.file()),
             Loaded {
                 settings: Settings::new(20, d.activation_delay(), d.jitter(), d.hotkey()).unwrap(),
-                armed: true,
+                arm_on_startup: false,
+                first_run: false,
                 problem: None
             }
         );

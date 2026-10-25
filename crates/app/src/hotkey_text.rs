@@ -174,10 +174,21 @@ pub fn usable(hotkey: Hotkey) -> Result<Hotkey, String> {
 mod tests {
     use super::*;
 
+    fn ctrl_alt_f8() -> Hotkey {
+        Hotkey {
+            modifiers: Modifiers {
+                ctrl: true,
+                alt: true,
+                ..Modifiers::default()
+            },
+            key: Key::F8,
+        }
+    }
+
     #[test]
-    fn the_default_hotkey_reads_ctrl_alt_f8() {
-        assert_eq!(HotkeyText(Hotkey::default()).to_string(), "Ctrl+Alt+F8");
-        assert_eq!(parse("Ctrl+Alt+F8"), Ok(Hotkey::default()));
+    fn ctrl_alt_f8_reads_as_written() {
+        assert_eq!(HotkeyText(ctrl_alt_f8()).to_string(), "Ctrl+Alt+F8");
+        assert_eq!(parse("Ctrl+Alt+F8"), Ok(ctrl_alt_f8()));
     }
 
     #[test]
@@ -210,7 +221,7 @@ mod tests {
 
     #[test]
     fn case_spacing_and_order_are_ignored() {
-        assert_eq!(parse(" alt + CONTROL+f8 "), Ok(Hotkey::default()));
+        assert_eq!(parse(" alt + CONTROL+f8 "), Ok(ctrl_alt_f8()));
     }
 
     #[test]

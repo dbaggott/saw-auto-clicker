@@ -1,6 +1,6 @@
 //! What the tray shows (R14, R16), worked out from the core's reports.
 
-use saw_core::{Button, ButtonEvent, Direction, Source, Verdict};
+use saw_core::{Button, ButtonEvent, Direction, Hotkey, Settings, Source, Verdict};
 
 /// R16's message.
 pub const ELEVATED_MESSAGE: &str = "Clicking is unavailable over elevated (administrator) windows.";
@@ -15,6 +15,12 @@ pub struct TrayState {
     /// No toggle hotkey is registered, because the one in the settings was
     /// refused at startup (R15).
     pub hotkey_missing: bool,
+}
+
+/// Whether the settings name a hotkey that isn't registered, because it was
+/// refused (R15). Having no hotkey at all is not a problem.
+pub fn hotkey_missing(settings: &Settings, active: Option<Hotkey>) -> bool {
+    settings.hotkey().is_some() && active.is_none()
 }
 
 impl TrayState {
@@ -71,6 +77,8 @@ impl BurstWatch {
 
 #[cfg(test)]
 mod tests {
+    use saw_core::{Key, Modifiers};
+
     use super::*;
 
     fn event(button: Button, direction: Direction, source: Source) -> ButtonEvent {
@@ -97,6 +105,28 @@ mod tests {
             state.tooltip(),
             format!("saw-auto-clicker: armed\n{ELEVATED_MESSAGE}\n{HOTKEY_MISSING_MESSAGE}")
         );
+    }
+
+    #[test]
+    fn only_a_chosen_hotkey_that_isnt_registered_is_missing() {
+        let hotkey = Hotkey {
+            modifiers: Modifiers {
+                ctrl: true,
+                ..Modifiers::default()
+            },
+            key: Key::F8,
+        };
+        let none = Settings::default();
+        let chosen = Settings::new(
+            none.cps(),
+            none.activation_delay(),
+            none.jitter(),
+            Some(hotkey),
+        )
+        .unwrap();
+        assert!(!hotkey_missing(&none, None));
+        assert!(hotkey_missing(&chosen, None));
+        assert!(!hotkey_missing(&chosen, Some(hotkey)));
     }
 
     #[test]

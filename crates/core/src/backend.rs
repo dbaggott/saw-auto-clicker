@@ -37,9 +37,10 @@ pub trait Inject {
 }
 
 pub trait RegisterHotkey {
-    /// Registers `hotkey` as the toggle, replacing the current one. On error
-    /// the current one stays registered (R15).
-    fn register(&mut self, hotkey: Hotkey) -> Result<(), HotkeyError>;
+    /// Registers `hotkey` as the toggle, replacing the current one, or with
+    /// `None` leaves no toggle registered. On error the current one stays
+    /// registered (R15).
+    fn register(&mut self, hotkey: Option<Hotkey>) -> Result<(), HotkeyError>;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

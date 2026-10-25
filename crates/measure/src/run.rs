@@ -9,7 +9,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use saw_core::{Button, Direction, Hotkey, Settings, Source, Status, Verdict};
+use saw_core::{Button, Direction, Settings, Source, Status, Verdict};
 use saw_windows::{Clicker, ThrottlingOptOuts};
 use windows::Win32::System::Console::{CTRL_BREAK_EVENT, CTRL_C_EVENT, SetConsoleCtrlHandler};
 use windows::core::BOOL;
@@ -43,7 +43,7 @@ pub fn run(requested: RunInfo, log_path: &Path) -> Result<(), String> {
         requested.cps,
         Duration::from_millis(requested.delay_ms),
         f64::from(requested.jitter_percent) / 100.0,
-        Hotkey::default(),
+        None,
     )
     .map_err(|e| e.to_string())?;
     let file =

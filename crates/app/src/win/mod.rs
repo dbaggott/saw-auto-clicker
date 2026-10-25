@@ -75,7 +75,7 @@ fn self_test() -> ExitCode {
             println!("settings window {round}: drew 30 frames and closed");
             app.handle_arrivals();
         }
-        app.apply_settings(app.settings.clone());
+        app.apply_settings(app.settings.clone(), app.arm_on_startup);
         if let Some(problem) = &app.hotkey_problem {
             // A hotkey already held elsewhere on this machine is not a fault
             // in the app.

@@ -1,6 +1,6 @@
-//! saw-auto-clicker's tray app: arms the clicker at launch unless it was left
-//! disarmed, shows its state in the notification area, and keeps its settings
-//! and that state in a per-user file.
+//! saw-auto-clicker's tray app: arms the clicker at launch on the first run
+//! or when set to, shows its state in the notification area, and keeps its
+//! settings in a per-user file.
 
 // No console window for a tray app.
 #![cfg_attr(windows, windows_subsystem = "windows")]

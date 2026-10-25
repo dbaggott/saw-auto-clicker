@@ -18,7 +18,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 use crate::apply::apply;
 use crate::config;
-use crate::status::{BurstWatch, TrayState};
+use crate::status::{BurstWatch, TrayState, hotkey_missing};
 use crate::win::autostart::StartAtLogin;
 use crate::win::instance::show_error;
 use crate::win::tray::{MenuAction, Tray};
@@ -56,38 +56,23 @@ pub enum Next {
     Quit,
 }
 
-/// Whether applied settings and the armed state are written to the settings
-/// file. The self-test arms even when that file says disarmed, and never
-/// writes it.
+/// Whether settings are written to the settings file. The self-test arms
+/// even when that file says not to, and never writes it.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Persist {
     Yes,
     No,
 }
 
-/// Whether a successful save clears the warning about the file as loaded.
-/// Apply does, since the user has just reviewed every value it writes. A
-/// toggle doesn't, so the warning naming a value the save replaced with its
-/// default stays until the user has seen it in the settings window.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Clears {
-    ConfigProblem,
-    Nothing,
-}
-
 pub struct App {
     pub settings: Settings,
+    pub arm_on_startup: bool,
     pub active_hotkey: Option<Hotkey>,
     pub hotkey_problem: Option<String>,
     pub config_problem: Option<String>,
     pub save_problem: Option<String>,
     config_path: Option<PathBuf>,
     persist: Persist,
-    /// The armed state as last loaded from, written to, or tried on the
-    /// settings file. The clicker's reports are what change it: the tray
-    /// starts disarmed before the first report, which is not a real state.
-    /// A failed save waits for the next toggle rather than retrying.
-    armed_written: bool,
     tray_state: TrayState,
     tray: Tray,
     start_at_login: StartAtLogin,
@@ -98,16 +83,18 @@ pub struct App {
 }
 
 impl App {
-    /// Starts everything and arms (Q-b) unless the settings file says it was
-    /// left disarmed. Runs on the main thread, which must then pump messages:
-    /// [`App::run`] does.
+    /// Starts everything, arming on the first run and otherwise only when
+    /// the settings file says to arm on startup; the state the app was left
+    /// in last time doesn't count. The first run writes the file, so the
+    /// next start is not a first run. Runs on the main thread, which must
+    /// then pump messages: [`App::run`] does.
     pub fn start(persist: Persist) -> Result<App, String> {
         let config_path = config::default_path();
         let loaded = match &config_path {
             Some(path) => config::load(path),
-            None => config::Loaded::defaults(Some(
-                "APPDATA is not set, so settings can't be saved".into(),
-            )),
+            None => {
+                config::Loaded::defaults("APPDATA is not set, so settings can't be saved".into())
+            }
         };
         let (events_tx, events) = mpsc::channel();
         let to_main = ToMain {
@@ -139,7 +126,7 @@ impl App {
         let tray_state = TrayState {
             armed: false,
             elevated_warning: false,
-            hotkey_missing: applied.active_hotkey.is_none(),
+            hotkey_missing: hotkey_missing(&applied.settings, applied.active_hotkey),
         };
         let tray = match Tray::new(tray_state, start_at_login_checked(&start_at_login)) {
             Ok(tray) => tray,
@@ -150,15 +137,15 @@ impl App {
                 return Err(e);
             }
         };
-        let app = App {
+        let mut app = App {
             settings: applied.settings,
+            arm_on_startup: loaded.arm_on_startup,
             active_hotkey: applied.active_hotkey,
             hotkey_problem: applied.hotkey_problem,
             config_problem: loaded.problem,
             save_problem: None,
             config_path,
             persist,
-            armed_written: loaded.armed,
             tray_state,
             tray,
             start_at_login,
@@ -166,7 +153,10 @@ impl App {
             hotkeys: Some(hotkeys),
             clicker: Some(clicker),
         };
-        if loaded.armed || persist == Persist::No {
+        if loaded.first_run {
+            app.save();
+        }
+        if loaded.first_run || loaded.arm_on_startup || persist == Persist::No {
             app.clicker().controller().set_armed(true);
         }
         Ok(app)
@@ -233,11 +223,6 @@ impl App {
         if self.tray_state != shown {
             self.tray.show(self.tray_state);
         }
-        // Saved on each change rather than at quit, which Windows can skip at
-        // sign-out or shutdown.
-        if armed_reported.is_some_and(|armed| armed != self.armed_written) {
-            self.save(self.tray_state.armed, Clears::Nothing);
-        }
         // Only the menu matters; icon clicks are drained so they don't pile up.
         while TrayIconEvent::receiver().try_recv().is_ok() {}
         let mut next = Next::Wait;
@@ -268,9 +253,9 @@ impl App {
             .set_start_at_login(start_at_login_checked(&self.start_at_login));
     }
 
-    /// Puts the settings window's settings into effect and saves them (R14,
-    /// R15). They apply from the next press.
-    pub fn apply_settings(&mut self, requested: Settings) {
+    /// Puts the settings window's settings into effect and saves them with
+    /// whether to arm on startup (R14, R15). They apply from the next press.
+    pub fn apply_settings(&mut self, requested: Settings, arm_on_startup: bool) {
         let hotkeys = self.hotkeys.as_mut().expect("present until quit");
         let applied = apply(&self.settings, self.active_hotkey, requested, hotkeys);
         self.clicker()
@@ -279,30 +264,32 @@ impl App {
         self.settings = applied.settings;
         self.active_hotkey = applied.active_hotkey;
         self.hotkey_problem = applied.hotkey_problem;
-        self.tray_state.hotkey_missing = self.active_hotkey.is_none();
+        self.arm_on_startup = arm_on_startup;
+        self.tray_state.hotkey_missing = hotkey_missing(&self.settings, self.active_hotkey);
         self.tray.show(self.tray_state);
-        self.save(self.armed_written, Clears::ConfigProblem);
+        self.save();
     }
 
-    /// Writes the current settings and `armed` to the settings file, unless
-    /// this run doesn't persist, and records why when it can't.
-    fn save(&mut self, armed: bool, clears: Clears) {
-        self.armed_written = armed;
+    /// Writes the current settings to the settings file, unless this run
+    /// doesn't persist, and records why when it can't. A successful save
+    /// clears the warning about the file as loaded, since every value it
+    /// named has been replaced.
+    fn save(&mut self) {
         self.save_problem = match (&self.config_path, self.persist) {
             (_, Persist::No) => None,
             (None, Persist::Yes) => Some("APPDATA is not set, so settings can't be saved".into()),
-            (Some(path), Persist::Yes) => match config::save(path, &self.settings, armed) {
-                Ok(()) => {
-                    if clears == Clears::ConfigProblem {
+            (Some(path), Persist::Yes) => {
+                match config::save(path, &self.settings, self.arm_on_startup) {
+                    Ok(()) => {
                         self.config_problem = None;
+                        None
                     }
-                    None
+                    Err(e) => Some(format!(
+                        "Settings could not be saved to {}: {e}",
+                        path.display()
+                    )),
                 }
-                Err(e) => Some(format!(
-                    "Settings could not be saved to {}: {e}",
-                    path.display()
-                )),
-            },
+            }
         };
     }
 
