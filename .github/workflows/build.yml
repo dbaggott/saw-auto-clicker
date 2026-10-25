@@ -2,7 +2,7 @@ name: Build
 
 # The release build of both binaries, and the app's installer, for each
 # Windows target. On main, the release workflow publishes these same
-# artifacts, so what CI built is what ships.
+# installers, so what CI built is what ships.
 on:
   workflow_call:
 
@@ -43,7 +43,7 @@ jobs:
             Where-Object name -eq 'saw-app' | ForEach-Object version
           $release = "target\$env:TARGET\release"
           iscc "/DAppVersion=$version" "/DArch=$env:ARCH" "/DAppExe=$PWD\$release\saw-app.exe" `
-            "/O$release" /Fsaw-auto-clicker-setup installer\saw-auto-clicker.iss
+            "/O$release" /Fsaw-auto-clicker-installer installer\saw-auto-clicker.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v7
         with:
@@ -51,5 +51,5 @@ jobs:
           path: |
             target/${{ matrix.target }}/release/saw-app.exe
             target/${{ matrix.target }}/release/saw-measure.exe
-            target/${{ matrix.target }}/release/saw-auto-clicker-setup.exe
+            target/${{ matrix.target }}/release/saw-auto-clicker-installer.exe
           if-no-files-found: error
