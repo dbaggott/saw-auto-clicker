@@ -78,6 +78,21 @@ jobs:
           path: built
       - run: ./.github/scripts/check-installer.ps1 -Installer built/saw-auto-clicker-installer.exe -Machine ${{ matrix.machine }}
 
+  # Fails a version bump that has no CHANGELOG.md section, which the release
+  # would otherwise only find after the merge.
+  changelog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: CHANGELOG.md has notes for the workspace version
+        env:
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
+          .github/scripts/release-notes.sh "v$version" "$GH_REPO"
+
   # Third-party actions on the site's path to the publish role are pinned to
   # commit SHAs: this repo is public, and a moved tag would run someone else's
   # code with what that role can write.
@@ -183,7 +198,7 @@ jobs:
           fi
 
   release:
-    needs: [release-check, test, macos, build, installer]
+    needs: [release-check, test, macos, build, installer, changelog]
     if: needs.release-check.outputs.unreleased == 'true'
     uses: ./.github/workflows/release.yml
     permissions:
@@ -199,7 +214,7 @@ jobs:
   # only after a merge, so they are left out.
   ci-required:
     if: always()
-    needs: [test, macos, build, installer, site, publish-site]
+    needs: [test, macos, build, installer, changelog, site, publish-site]
     runs-on: ubuntu-latest
     steps:
       - name: Verify every required job succeeded
