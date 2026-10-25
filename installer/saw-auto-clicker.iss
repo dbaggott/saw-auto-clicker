@@ -2,7 +2,7 @@
 ; target (.github/workflows/build.yml):
 ;
 ;   iscc /DAppVersion=<version> /DArch=x64|arm64 /DAppExe=<path to saw-app.exe>
-;        /O<output dir> /Fsaw-auto-clicker-setup installer\saw-auto-clicker.iss
+;        /O<output dir> /Fsaw-auto-clicker-installer installer\saw-auto-clicker.iss
 
 #ifndef AppVersion
   #error Pass the version: /DAppVersion=<workspace version>

@@ -4,7 +4,7 @@
 # saw-auto-clicker is not installed; CI's installer job runs it on a fresh
 # runner.
 param(
-    # A directory holding saw-auto-clicker-setup.exe for x64, as build.yml
+    # A directory holding saw-auto-clicker-installer.exe for x64, as build.yml
     # uploads it, and the arm64 one in an arm64 subdirectory.
     [Parameter(Mandatory)] [string] $Built
 )
@@ -59,14 +59,14 @@ if ($LASTEXITCODE -ne 0) { throw 'could not read the workspace version from Carg
 if (Test-Path $installDir) { throw "$installDir already exists; run this where saw-auto-clicker is not installed" }
 
 Write-Host '== the arm64 installer refuses to run on x64'
-$code = Invoke-Setup (Join-Path $Built 'arm64\saw-auto-clicker-setup.exe') @(
+$code = Invoke-Setup (Join-Path $Built 'arm64\saw-auto-clicker-installer.exe') @(
     '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=`"$logs\arm64-setup.log`"")
 Write-Host "exit code $code"
 if ($code -eq 0) { Fail 'the arm64 installer exited 0 on x64' }
 if (Test-Path $installDir) { Fail "the arm64 installer created $installDir on x64" }
 
 Write-Host '== install silently with Start at login'
-$code = Invoke-Setup (Join-Path $Built 'saw-auto-clicker-setup.exe') @(
+$code = Invoke-Setup (Join-Path $Built 'saw-auto-clicker-installer.exe') @(
     '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/TASKS=startatlogin', "/LOG=`"$logs\setup.log`"")
 if ($code -ne 0) { Fail "setup exited $code" }
 if (-not (Test-Path $installedExe)) { Fail "$installedExe is missing" }

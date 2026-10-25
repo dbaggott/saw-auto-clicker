@@ -1,11 +1,11 @@
 name: Release
 
 # Called by CI on a push to main whose workspace version has no release yet.
-# Checks that the x64 binaries CI built for that commit launch, then publishes
-# a GitHub release tagged v<version> at the commit, with both binaries and the
-# installer for x64 and arm64 attached; CI's installer job has already
-# installed and uninstalled the x64 installer. A version with a hyphen, such
-# as 0.2.0-rc.1, is a pre-release.
+# Checks that the x64 app CI built for that commit launches, then publishes a
+# GitHub release tagged v<version> at the commit, with the x64 and arm64
+# installers attached; CI's installer job has already installed and
+# uninstalled the x64 installer. A version with a hyphen, such as 0.2.0-rc.1,
+# is a pre-release.
 on:
   workflow_call:
     inputs:
@@ -18,8 +18,8 @@ permissions:
   contents: read
 
 jobs:
-  # Runs the exact bytes the release will carry. Bash, because it waits for
-  # any child and reports its exit code; PowerShell skips the wait for a
+  # Runs the exact app the release's installers carry. Bash, because it waits
+  # for any child and reports its exit code; PowerShell skips the wait for a
   # GUI-subsystem program unless its output is piped.
   smoke-x64:
     runs-on: windows-latest
@@ -41,16 +41,6 @@ jobs:
           echo "exit code $status, stdout: $out"
           test "$status" -eq 0
           test "$out" = "saw-app ${TAG#v}"
-      - name: saw-measure starts and prints its usage
-        run: |
-          # With no command it refuses with its usage, which it prints only
-          # once it has started.
-          status=0
-          err=$(./saw-measure.exe 2>&1 >/dev/null) || status=$?
-          echo "exit code $status"
-          echo "$err"
-          test "$status" -eq 1
-          grep -q 'saw-measure run --cps' <<<"$err"
 
   release:
     needs: smoke-x64
@@ -75,9 +65,7 @@ jobs:
           mkdir assets
           for pair in x86_64-pc-windows-msvc:x64 aarch64-pc-windows-msvc:arm64; do
             target=${pair%%:*} arch=${pair##*:}
-            cp "built/saw-$target/saw-app.exe" "assets/saw-auto-clicker-$TAG-$arch.exe"
-            cp "built/saw-$target/saw-measure.exe" "assets/saw-measure-$TAG-$arch.exe"
-            cp "built/saw-$target/saw-auto-clicker-setup.exe" "assets/saw-auto-clicker-$TAG-$arch-setup.exe"
+            cp "built/saw-$target/saw-auto-clicker-installer.exe" "assets/saw-auto-clicker-$TAG-$arch-installer.exe"
           done
           ls -l assets
       - name: Publish the release
@@ -102,11 +90,9 @@ jobs:
             exit 1
           fi
           cat > notes.md <<NOTES
-          Which file to download, how to install or run it, and the SmartScreen prompt these unsigned builds show: see the [README](https://github.com/$GH_REPO/blob/$TAG/README.md#download-and-install).
+          Most Windows PCs need \`saw-auto-clicker-$TAG-x64-installer.exe\`. Windows on ARM, such as a Snapdragon laptop, needs \`saw-auto-clicker-$TAG-arm64-installer.exe\`.
 
-          \`saw-auto-clicker-$TAG-x64-setup.exe\` and \`saw-auto-clicker-$TAG-arm64-setup.exe\` install the app for your user, with a Start menu entry and an uninstaller. \`saw-auto-clicker-$TAG-x64.exe\` and \`saw-auto-clicker-$TAG-arm64.exe\` are the same app, to run without installing.
-
-          \`saw-measure-$TAG-x64.exe\` and \`saw-measure-$TAG-arm64.exe\` are a developer timing tool, not part of the app.
+          For full installation directions, see the [README](https://github.com/$GH_REPO/blob/$TAG/README.md#download-and-install).
           NOTES
           prerelease=()
           [[ $TAG == *-* ]] && prerelease=(--prerelease)
