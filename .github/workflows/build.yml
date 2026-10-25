@@ -2,7 +2,7 @@ name: Build
 
 # The release build of both binaries, and the app's installer, for each
 # Windows target. On main, the release workflow publishes these same
-# artifacts, so what CI built is what ships.
+# installers, so what CI built is what ships.
 on:
   workflow_call:
 
