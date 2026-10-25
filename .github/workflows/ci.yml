@@ -58,7 +58,9 @@ jobs:
           version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
           .github/scripts/release-notes.sh "v$version" "$GITHUB_REPOSITORY"
 
+  # Every artifact is built only once every test has passed.
   build:
+    needs: [test, macos]
     uses: ./.github/workflows/build.yml
 
   # Installs and uninstalls the installer CI just built, the bytes a release
@@ -89,6 +91,7 @@ jobs:
   # commit SHAs: this repo is public, and a moved tag would run someone else's
   # code with what that role can write.
   site:
+    needs: [test, macos]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
