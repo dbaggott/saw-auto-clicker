@@ -2,7 +2,7 @@
 //! blade with a small pointer whose tip sits on the blade's centre, orange
 //! when armed and grey when disarmed (R14).
 //!
-//! The drawing uses only arithmetic and square roots, which IEEE 754 rounds
+//! The drawing uses only arithmetic and comparisons, which IEEE 754 rounds
 //! the same everywhere, so the icon file written on one host matches the
 //! drawing a test makes on another.
 
@@ -17,10 +17,11 @@ const CENTRE: f64 = UNITS / 2.0;
 const TEETH: usize = 14;
 const TOOTH_TIP_RADIUS: f64 = 15.5;
 const GULLET_RADIUS: f64 = 12.3;
-/// cos and sin of one tooth's pitch, 2π/14, and of the 0.6 of it from a
-/// gullet to the next tip. Written out because `f64::cos` comes from the
-/// platform's maths library, which may round the last bit differently.
+/// cos and sin of one tooth's pitch, 2π/14. Written out, as is [`TO_TIP`],
+/// because `f64::cos` comes from the platform's maths library, which may
+/// round the last bit differently.
 const PITCH: (f64, f64) = (0.9009688679024191, 0.4338837391175581);
+/// cos and sin of the 0.6 of a pitch from a gullet to the next tooth's tip.
 const TO_TIP: (f64, f64) = (0.9639628606958532, 0.2660368455666751);
 
 const HUB_RADIUS: f64 = 9.0;
