@@ -59,12 +59,6 @@ jobs:
         with:
           name: saw-installer
           path: built
-      - name: Name the asset
-        run: |
-          set -euo pipefail
-          mkdir assets
-          cp built/saw-auto-clicker-installer.exe "assets/saw-auto-clicker-$TAG-installer.exe"
-          ls -l assets
       - name: Publish the release
         run: |
           set -euo pipefail
@@ -77,7 +71,7 @@ jobs:
               echo "::notice::$TAG is already released from $tagged; nothing to publish for $SHA"
               exit 0
             fi
-            gh release upload "$TAG" assets/* --clobber
+            gh release upload "$TAG" built/saw-auto-clicker-installer.exe --clobber
             exit 0
           fi
           # gh release create ignores --target when the tag already exists, so
@@ -87,11 +81,11 @@ jobs:
             exit 1
           fi
           cat > notes.md <<NOTES
-          Download and run \`saw-auto-clicker-$TAG-installer.exe\`. It installs the build for your PC, whether Intel, AMD or Windows on ARM.
+          Download and run \`saw-auto-clicker-installer.exe\`. It installs the build for your PC, whether Intel, AMD or Windows on ARM.
 
           For full installation directions, see the [README](https://github.com/$GH_REPO/blob/$TAG/README.md#download-and-install).
           NOTES
           prerelease=()
           [[ $TAG == *-* ]] && prerelease=(--prerelease)
-          gh release create "$TAG" assets/* --target "$SHA" --title "$TAG" \
+          gh release create "$TAG" built/saw-auto-clicker-installer.exe --target "$SHA" --title "$TAG" \
             --notes-file notes.md "${prerelease[@]}"
