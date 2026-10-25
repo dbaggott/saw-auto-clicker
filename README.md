@@ -8,7 +8,7 @@ The auto-clicker runs on Windows-only currently.  Open an issue if you want it o
 
 ## Install
 
-Download and run the installer from the [latest release](https://github.com/dbaggott/saw-auto-clicker/releases/latest):
+Download and run the installer from the [latest release](https://github.com/dbaggott/saw-auto-clicker/releases/latest).
 
 It installs for your user only. The installer isn't signed so you may get warnings about that from Microsoft Defender, if that happens, you'll need to navigate through allowing the application.
 
