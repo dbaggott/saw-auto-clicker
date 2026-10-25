@@ -6,7 +6,7 @@ It runs on Windows. macOS and Linux may follow later.
 
 ## How to use it
 
-When it starts, saw-auto-clicker puts an icon in the notification area (the system tray, near the clock) and is **armed**.
+When it starts, saw-auto-clicker puts an icon in the notification area (the system tray, near the clock). It starts the way you left it, armed or disarmed, including when it starts at login. The first time you run it, it's **armed**.
 
 - **Armed:** press a button and hold it past the activation delay (250 ms unless you change it). The app then clicks that button at the set rate until you release it. Left and right work independently, and holding both auto-clicks both. Only a press that begins while armed counts: a button you're already holding when you arm doesn't auto-click until you release it and press again.
 - **Disarmed:** every click and hold reaches your applications unchanged.
@@ -72,9 +72,10 @@ cps = 10
 activation_delay_ms = 250
 jitter_percent = 0
 hotkey = "Ctrl+Alt+F8"
+armed = true
 ```
 
-A missing file or a missing value means the default. A value that's invalid falls back to its default, and the settings window shows a warning naming it. If the saved hotkey can't be registered when the app starts, the tray tooltip says no hotkey is active; open Settings to pick another.
+`armed` is the state the app starts in, and the app rewrites the file each time you arm or disarm. A missing file or a missing value means the default. A value that's invalid falls back to its default, and the settings window shows a warning naming it. If the saved hotkey can't be registered when the app starts, the tray tooltip says no hotkey is active; open Settings to pick another.
 
 ## saw-measure
 
