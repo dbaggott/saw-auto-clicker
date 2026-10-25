@@ -23,20 +23,24 @@ While armed, *any* hold longer than the activation delay auto-clicks, and that i
 
 ## Download and install
 
-Download one file from the [latest release](https://github.com/dbaggott/saw-auto-clicker/releases/latest):
+Download one installer from the [latest release](https://github.com/dbaggott/saw-auto-clicker/releases/latest):
 
-- `saw-auto-clicker-<version>-x64.exe` for most Windows PCs (Intel or AMD processors).
-- `saw-auto-clicker-<version>-arm64.exe` for Windows on ARM, such as a Snapdragon laptop or a Windows virtual machine on an Apple Silicon Mac.
+- `saw-auto-clicker-<version>-x64-setup.exe` for most Windows PCs (Intel or AMD processors).
+- `saw-auto-clicker-<version>-arm64-setup.exe` for Windows on ARM, such as a Snapdragon laptop or a Windows virtual machine on an Apple Silicon Mac.
 
-If you're not sure which you have, open **Settings > System > About** and read **System type**.
+If you're not sure which you have, open **Settings > System > About** and read **System type**. An installer for the wrong one says so and stops.
 
-There's no installer. Save the file somewhere it can stay, such as a `saw-auto-clicker` folder in your user folder, and double-click it to run. Running it again while it's already running just tells you so.
+Run it. It installs for your user only, so it doesn't ask for administrator rights, and it can start saw-auto-clicker at login if you tick **Start at login**. You get a Start menu entry, and you can uninstall from **Settings > Apps**. Installing a newer version over an older one upgrades it in place. If saw-auto-clicker is running, the installer and the uninstaller ask you to quit it first. Uninstalling keeps your settings file, so reinstalling picks them up again.
+
+### Without installing
+
+Each release also carries the app on its own, `saw-auto-clicker-<version>-x64.exe` and `saw-auto-clicker-<version>-arm64.exe`. Save the file somewhere it can stay, such as a `saw-auto-clicker` folder in your user folder, and double-click it to run. Running it again while it's already running just tells you so.
 
 **Start at login** remembers where the file is. If you move the file later, the menu item shows unchecked; click it again to point it at the new location.
 
 ### "Windows protected your PC"
 
-The release files aren't code-signed, so the first time you run one, Microsoft Defender SmartScreen may show **Windows protected your PC**. Click **More info**, then **Run anyway**.
+The release files aren't code-signed, so the first time you run one, installer or app, Microsoft Defender SmartScreen may show **Windows protected your PC**. Click **More info**, then **Run anyway**.
 
 Microsoft Defender Antivirus may also flag or quarantine the file, because it watches mouse input and sends clicks, which some unwanted software also does. This hasn't been observed, but it's possible for an unsigned program like this one. If it happens, open **Windows Security > Virus & threat protection > Protection history**, select the entry for saw-auto-clicker, and choose **Allow on device**. Only do that for a file you downloaded from this project's releases page.
 
@@ -85,7 +89,11 @@ Each release also carries `saw-measure-<version>-x64.exe` and `saw-measure-<vers
 
 The workspace builds on any host. Windows-only code sits behind `cfg(windows)`, so on macOS or Linux `cargo clippy --workspace --all-targets` checks everything and `cargo test -p saw-core` runs the core's tests.
 
-Releases are cut by bumping `version` in the workspace `Cargo.toml`, then running `cargo check` so `Cargo.lock` records the new version too; CI builds with `--locked` and fails on a stale lock file. When a push to main carries a version that has no release yet, CI tests and builds it as usual, checks that the x64 binaries launch, and publishes a GitHub release tagged `v<version>` at that commit with the four files attached (`.github/workflows/release.yml`). A version with a hyphen, such as `1.0.0-rc.1`, publishes a pre-release. The download page links to the latest release, which GitHub never resolves to a pre-release.
+Releases are cut by bumping `version` in the workspace `Cargo.toml`, then running `cargo check` so `Cargo.lock` records the new version too; CI builds with `--locked` and fails on a stale lock file. When a push to main carries a version that has no release yet, CI tests and builds it as usual, installs and uninstalls the x64 installer, checks that the x64 binaries launch, and publishes a GitHub release tagged `v<version>` at that commit with the six files attached: the app, its installer and `saw-measure`, each for x64 and arm64 (`.github/workflows/release.yml`). A version with a hyphen, such as `1.0.0-rc.1`, publishes a pre-release. The download page links to the latest release, which GitHub never resolves to a pre-release.
+
+The installer is an [Inno Setup](https://jrsoftware.org/isinfo.php) script, `installer/saw-auto-clicker.iss`, which CI compiles for each architecture (`.github/workflows/build.yml`). `.github/scripts/check-installer.ps1` is the install and uninstall check CI runs on it.
+
+The app's icon file, `crates/app/assets/saw-auto-clicker.ico`, is drawn by `crates/app/src/icon.rs`, and a test fails when the two differ. After changing the drawing, regenerate the file with `cargo test -p saw-app write_the_icon_file -- --ignored`.
 
 ### The download page
 

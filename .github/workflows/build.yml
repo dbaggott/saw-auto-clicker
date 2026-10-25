@@ -1,8 +1,8 @@
 name: Build
 
-# The release build of both binaries for each Windows target. On main, the
-# release workflow publishes these same artifacts, so what CI built is what
-# ships.
+# The release build of both binaries, and the app's installer, for each
+# Windows target. On main, the release workflow publishes these same
+# artifacts, so what CI built is what ships.
 on:
   workflow_call:
 
@@ -17,7 +17,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [x86_64-pc-windows-msvc, aarch64-pc-windows-msvc]
+        include:
+          - target: x86_64-pc-windows-msvc
+            arch: x64
+          - target: aarch64-pc-windows-msvc
+            arch: arm64
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -27,10 +31,25 @@ jobs:
         with:
           key: ${{ matrix.target }}
       - run: cargo build --workspace --release --locked --target ${{ matrix.target }}
+      # Untagged: a pull request has no release tag, so the release names the
+      # installer when it publishes it. Written beside the binaries so the
+      # artifact keeps all three at its top level.
+      - name: Build the installer
+        env:
+          TARGET: ${{ matrix.target }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          $version = (cargo metadata --no-deps --format-version 1 --locked | ConvertFrom-Json).packages |
+            Where-Object name -eq 'saw-app' | ForEach-Object version
+          $release = "target\$env:TARGET\release"
+          iscc "/DAppVersion=$version" "/DArch=$env:ARCH" "/DAppExe=$PWD\$release\saw-app.exe" `
+            "/O$release" /Fsaw-auto-clicker-setup installer\saw-auto-clicker.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v7
         with:
           name: saw-${{ matrix.target }}
           path: |
             target/${{ matrix.target }}/release/saw-app.exe
             target/${{ matrix.target }}/release/saw-measure.exe
+            target/${{ matrix.target }}/release/saw-auto-clicker-setup.exe
           if-no-files-found: error

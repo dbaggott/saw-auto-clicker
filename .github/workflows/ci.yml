@@ -54,6 +54,25 @@ jobs:
   build:
     uses: ./.github/workflows/build.yml
 
+  # Installs and uninstalls the x64 installer CI just built, the bytes a
+  # release would publish. Gates the release as well as merges, so a broken
+  # installer never ships.
+  installer:
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: saw-x86_64-pc-windows-msvc
+          path: built
+      - uses: actions/download-artifact@v8
+        with:
+          name: saw-aarch64-pc-windows-msvc
+          path: built/arm64
+      - run: ./.github/scripts/check-installer.ps1 -Built built
+
   # Third-party actions on the site's path to the publish role are pinned to
   # commit SHAs: this repo is public, and a moved tag would run someone else's
   # code with what that role can write.
@@ -159,7 +178,7 @@ jobs:
           fi
 
   release:
-    needs: [release-check, test, macos, build]
+    needs: [release-check, test, macos, build, installer]
     if: needs.release-check.outputs.unreleased == 'true'
     uses: ./.github/workflows/release.yml
     permissions:
@@ -175,7 +194,7 @@ jobs:
   # only after a merge, so they are left out.
   ci-required:
     if: always()
-    needs: [test, macos, build, site, publish-site]
+    needs: [test, macos, build, installer, site, publish-site]
     runs-on: ubuntu-latest
     steps:
       - name: Verify every required job succeeded
