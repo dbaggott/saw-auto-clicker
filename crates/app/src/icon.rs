@@ -1,6 +1,7 @@
 //! The tray icon, drawn at startup so the app ships no image files: a saw
-//! blade with a small pointer whose tip sits on the blade's centre, orange
-//! when armed and grey when disarmed (R14).
+//! blade, orange with a small pointer whose tip sits on its centre when
+//! armed, and grey without the pointer when disarmed, so the states differ in
+//! shape as well as colour (R14).
 //!
 //! The drawing uses only arithmetic and comparisons, which IEEE 754 rounds
 //! the same everywhere, so the icon file written on one host matches the
@@ -41,21 +42,24 @@ const POINTER_EDGE_HALF_WIDTH: f64 = 0.4;
 const POINTER_FILL: [u8; 3] = [0xff, 0xff, 0xff];
 const POINTER_EDGE: [u8; 3] = [0x11, 0x11, 0x11];
 
-struct Palette {
+struct Look {
     blade: [u8; 3],
     hub: [u8; 3],
     arbor: [u8; 3],
+    pointer: bool,
 }
 
-const ARMED: Palette = Palette {
+const ARMED: Look = Look {
     blade: [0xf2, 0x6b, 0x1d],
     hub: [0xc4, 0x50, 0x0f],
     arbor: [0x2a, 0x0e, 0x02],
+    pointer: true,
 };
-const DISARMED: Palette = Palette {
+const DISARMED: Look = Look {
     blade: [0x8c, 0x8c, 0x8c],
     hub: [0x6e, 0x6e, 0x6e],
     arbor: [0x1e, 0x1e, 0x1e],
+    pointer: false,
 };
 
 /// Samples per pixel along each axis; a pixel's coverage is the share of
@@ -70,7 +74,7 @@ pub fn rgba(armed: bool) -> Vec<u8> {
 /// [`rgba`] drawn at `size` pixels square. The executable's icon is a file
 /// drawn from this, `assets/saw-auto-clicker.ico`, which a test keeps in step.
 pub fn rgba_at(size: u32, armed: bool) -> Vec<u8> {
-    let palette = if armed { &ARMED } else { &DISARMED };
+    let look = if armed { &ARMED } else { &DISARMED };
     let blade = blade_outline();
     let scale = UNITS / f64::from(size);
     let samples = SAMPLES * SAMPLES;
@@ -82,7 +86,7 @@ pub fn rgba_at(size: u32, armed: bool) -> Vec<u8> {
                 for sx in 0..SAMPLES {
                     let x = (f64::from(px) + (f64::from(sx) + 0.5) / f64::from(SAMPLES)) * scale;
                     let y = (f64::from(py) + (f64::from(sy) + 0.5) / f64::from(SAMPLES)) * scale;
-                    if let Some(colour) = colour_at(x - CENTRE, y - CENTRE, palette, &blade) {
+                    if let Some(colour) = colour_at(x - CENTRE, y - CENTRE, look, &blade) {
                         for (total, channel) in sum.iter_mut().zip(colour) {
                             *total += u32::from(channel);
                         }
@@ -102,22 +106,24 @@ pub fn rgba_at(size: u32, armed: bool) -> Vec<u8> {
 
 /// What the drawing shows at `(x, y)` units from the centre, topmost first,
 /// or `None` outside it.
-fn colour_at(x: f64, y: f64, palette: &Palette, blade: &[(f64, f64)]) -> Option<[u8; 3]> {
-    if distance_squared_to_edge(&POINTER, (x, y))
-        <= POINTER_EDGE_HALF_WIDTH * POINTER_EDGE_HALF_WIDTH
-    {
-        return Some(POINTER_EDGE);
-    }
-    if contains(&POINTER, (x, y)) {
-        return Some(POINTER_FILL);
+fn colour_at(x: f64, y: f64, look: &Look, blade: &[(f64, f64)]) -> Option<[u8; 3]> {
+    if look.pointer {
+        if distance_squared_to_edge(&POINTER, (x, y))
+            <= POINTER_EDGE_HALF_WIDTH * POINTER_EDGE_HALF_WIDTH
+        {
+            return Some(POINTER_EDGE);
+        }
+        if contains(&POINTER, (x, y)) {
+            return Some(POINTER_FILL);
+        }
     }
     let radius_squared = x * x + y * y;
     if radius_squared <= ARBOR_RADIUS * ARBOR_RADIUS {
-        Some(palette.arbor)
+        Some(look.arbor)
     } else if radius_squared <= HUB_RADIUS * HUB_RADIUS {
-        Some(palette.hub)
+        Some(look.hub)
     } else if contains(blade, (x, y)) {
-        Some(palette.blade)
+        Some(look.blade)
     } else {
         None
     }
@@ -186,20 +192,17 @@ mod tests {
     }
 
     #[test]
-    fn armed_and_disarmed_share_a_shape_in_different_colours() {
+    fn only_armed_has_the_pointer_and_the_blades_differ_in_colour() {
         let (armed, disarmed) = (rgba(true), rgba(false));
-        for (a, d) in armed.chunks(4).zip(disarmed.chunks(4)) {
-            assert_eq!(a[3], d[3]);
-        }
         assert_eq!(pixel_at(&armed, 0, 0)[3], 0);
-        // The blade, the hub, and the pointer below and right of the centre.
+        assert_eq!(pixel_at(&disarmed, 0, 0)[3], 0);
         let blade = pixel_at(&armed, 5, 16);
         assert_eq!(blade[3], 255);
         assert_ne!(blade, pixel_at(&disarmed, 5, 16));
-        assert_ne!(blade, pixel_at(&armed, 12, 20));
-        for icon in [&armed, &disarmed] {
-            assert_eq!(pixel_at(icon, 17, 20), [0xff, 0xff, 0xff, 0xff]);
-        }
+        // Below and right of the centre: the pointer when armed, the hub when
+        // disarmed.
+        assert_eq!(pixel_at(&armed, 17, 20), [0xff, 0xff, 0xff, 0xff]);
+        assert_eq!(pixel_at(&disarmed, 17, 20), [0x6e, 0x6e, 0x6e, 0xff]);
     }
 
     /// The executable's and the installer's icon.
