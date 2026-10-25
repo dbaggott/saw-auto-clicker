@@ -20,8 +20,8 @@ pub fn main() -> ExitCode {
     match args.iter().map(String::as_str).collect::<Vec<_>>()[..] {
         [] => run(),
         ["--self-test"] => self_test(),
-        // Before the single-instance check and the hook, so the release
-        // workflow's smoke check can run it anywhere and read its exit code.
+        // Before the single-instance check and the hook, so CI's installer
+        // check can run it anywhere and read its exit code.
         // A GUI-subsystem process has no console, so the line is seen only
         // when stdout is redirected.
         ["--version"] => {
