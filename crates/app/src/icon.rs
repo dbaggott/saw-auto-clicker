@@ -12,8 +12,8 @@ pub fn rgba(armed: bool) -> Vec<u8> {
     rgba_at(SIZE, armed)
 }
 
-/// [`rgba`] drawn at `size` pixels square, for the executable's icon, which
-/// Windows shows larger than the tray does.
+/// [`rgba`] drawn at `size` pixels square. The executable's icon is a file
+/// drawn from this, `assets/saw-auto-clicker.ico`, which a test keeps in step.
 pub fn rgba_at(size: u32, armed: bool) -> Vec<u8> {
     let centre = size as f32 / 2.0;
     let outer = centre - 1.0;
@@ -67,7 +67,7 @@ mod tests {
         assert_ne!(armed[..3], disarmed[..3]);
     }
 
-    /// The executable's and the installer's icon, `crates/app/assets/`.
+    /// The executable's and the installer's icon.
     const ICON_FILE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/saw-auto-clicker.ico");
 
     /// The armed icon at the sizes Windows asks for most: 16 in lists, the

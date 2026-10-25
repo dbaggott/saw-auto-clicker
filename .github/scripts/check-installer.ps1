@@ -16,7 +16,8 @@ $installDir = Join-Path $env:LOCALAPPDATA 'Programs\saw-auto-clicker'
 $installedExe = Join-Path $installDir 'saw-auto-clicker.exe'
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $runValue = 'saw-auto-clicker'
-$logs = Join-Path $env:RUNNER_TEMP 'installer-logs'
+$temp = [IO.Path]::GetTempPath()
+$logs = Join-Path $temp 'saw-installer-logs'
 New-Item -ItemType Directory -Force $logs | Out-Null
 
 function Fail([string] $message) {
@@ -27,8 +28,8 @@ function Fail([string] $message) {
     throw $message
 }
 
-# Waits for the process and the children it starts, up to a deadline, so a
-# setup stuck on a message box fails the job instead of hanging it.
+# Waits up to a deadline, so a setup stuck on a message box fails the job
+# instead of hanging it.
 function Invoke-Setup([string] $exe, [string[]] $arguments) {
     $process = Start-Process $exe -ArgumentList $arguments -PassThru
     # Without a handle taken while it runs, ExitCode reads empty afterwards.
@@ -59,20 +60,20 @@ if (Test-Path $installDir) { throw "$installDir already exists; run this where s
 
 Write-Host '== the arm64 installer refuses to run on x64'
 $code = Invoke-Setup (Join-Path $Built 'arm64\saw-auto-clicker-setup.exe') @(
-    '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=$logs\arm64-setup.log")
+    '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=`"$logs\arm64-setup.log`"")
 Write-Host "exit code $code"
 if ($code -eq 0) { Fail 'the arm64 installer exited 0 on x64' }
 if (Test-Path $installDir) { Fail "the arm64 installer created $installDir on x64" }
 
 Write-Host '== install silently with Start at login'
 $code = Invoke-Setup (Join-Path $Built 'saw-auto-clicker-setup.exe') @(
-    '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/TASKS=startatlogin', "/LOG=$logs\setup.log")
+    '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/TASKS=startatlogin', "/LOG=`"$logs\setup.log`"")
 if ($code -ne 0) { Fail "setup exited $code" }
 if (-not (Test-Path $installedExe)) { Fail "$installedExe is missing" }
 
 Write-Host '== the installed exe reports the workspace version'
 # Redirected, because a GUI-subsystem program has no console to print to.
-$out = Join-Path $env:RUNNER_TEMP 'version.txt'
+$out = Join-Path $temp 'saw-version.txt'
 $process = Start-Process $installedExe -ArgumentList '--version' -RedirectStandardOutput $out -NoNewWindow -PassThru -Wait
 $reported = (Get-Content $out -Raw).Trim()
 Write-Host "exit code $($process.ExitCode), stdout: $reported"
@@ -87,7 +88,7 @@ if ($command -ne "`"$installedExe`"") { Fail "expected `"$installedExe`"" }
 
 Write-Host '== uninstall silently'
 $code = Invoke-Setup (Join-Path $installDir 'unins000.exe') @(
-    '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=$logs\uninstall.log")
+    '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=`"$logs\uninstall.log`"")
 if ($code -ne 0) { Fail "uninstall exited $code" }
 
 # The uninstaller hands its work to a copy of itself in %TEMP% and can exit

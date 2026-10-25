@@ -46,6 +46,9 @@ AppPublisherURL=https://github.com/dbaggott/saw-auto-clicker
 PrivilegesRequired=lowest
 DefaultDirName={autopf}\{#AppName}
 DisableProgramGroupPage=yes
+; Start at login stays unticked on an upgrade too, so reinstalling never turns
+; back on what the user turned off in the tray menu.
+UsePreviousTasks=no
 ArchitecturesAllowed={#Architecture}
 ArchitecturesInstallIn64BitMode={#Architecture}
 ; The app's single-instance mutex (crates/app/src/win/instance.rs): setup and
@@ -59,7 +62,7 @@ Compression=lzma2
 SolidCompression=yes
 
 [Tasks]
-Name: startatlogin; Description: "Start {#AppName} when I sign in to Windows"; Flags: unchecked
+Name: startatlogin; Description: "Start at login"; Flags: unchecked
 
 [Files]
 Source: "{#AppExe}"; DestDir: "{app}"; DestName: "{#AppExeName}"; Flags: ignoreversion
