@@ -49,9 +49,12 @@ struct Look {
     pointer: bool,
 }
 
+/// The armed hub's orange, which the settings window takes as its accent.
+pub const ARMED_HUB: [u8; 3] = [0xc4, 0x50, 0x0f];
+
 const ARMED: Look = Look {
     blade: [0xf2, 0x6b, 0x1d],
-    hub: [0xc4, 0x50, 0x0f],
+    hub: ARMED_HUB,
     arbor: [0x2a, 0x0e, 0x02],
     pointer: true,
 };

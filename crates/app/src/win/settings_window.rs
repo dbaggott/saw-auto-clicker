@@ -18,9 +18,9 @@ use crate::win::app::{App, Next};
 /// reports.
 const POLL: Duration = Duration::from_millis(100);
 
-/// The icon's hub orange (`icon.rs`). Its blade orange is too light to carry
-/// white text.
-const ACCENT: egui::Color32 = egui::Color32::from_rgb(0xc4, 0x50, 0x0f);
+/// The icon's hub orange: its blade orange is too light to carry white text.
+const ACCENT: egui::Color32 =
+    egui::Color32::from_rgb(icon::ARMED_HUB[0], icon::ARMED_HUB[1], icon::ARMED_HUB[2]);
 
 const WIDTH: f32 = 540.0;
 const MARGIN: i8 = 16;
@@ -91,6 +91,7 @@ pub fn show(app: &mut App, close_after_frames: Option<u32>) -> Result<Next, Stri
                 applied: false,
                 apply_problem: None,
                 next: &mut next,
+                requested_height: None,
                 frames: 0,
                 close_after_frames,
             }))
@@ -157,6 +158,9 @@ struct Window<'a> {
     /// Why the last Apply was refused before reaching the app.
     apply_problem: Option<String>,
     next: &'a mut Next,
+    /// The height last asked of the window, so a size the OS won't grant is
+    /// asked for once rather than every frame.
+    requested_height: Option<f32>,
     frames: u32,
     close_after_frames: Option<u32>,
 }
@@ -179,14 +183,21 @@ impl eframe::App for Window<'_> {
         let bottom = egui::CentralPanel::default()
             .frame(panel)
             .show(ui, |ui| {
-                self.settings(ui);
-                self.notices(ui);
-                ui.add_space(12.0);
-                self.buttons(ui);
-                ui.min_rect().bottom()
+                // Measured around the content: the panel itself always fills
+                // the window.
+                ui.vertical(|ui| {
+                    self.settings(ui);
+                    let changed = self.changed();
+                    self.notices(ui, changed);
+                    ui.add_space(12.0);
+                    self.buttons(ui, changed);
+                })
+                .response
+                .rect
+                .bottom()
             })
             .inner;
-        fit_height(ui.ctx(), bottom + MARGIN as f32);
+        self.fit_height(ui.ctx(), bottom + f32::from(MARGIN));
         self.frames += 1;
         if self.close_after_frames.is_some_and(|n| self.frames >= n) {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
@@ -252,17 +263,22 @@ impl Window<'_> {
             || self.arm_on_startup != self.app.arm_on_startup
     }
 
-    fn buttons(&mut self, ui: &mut egui::Ui) {
+    fn buttons(&mut self, ui: &mut egui::Ui, changed: bool) {
         // With the chosen hotkey refused, applying unchanged settings retries
         // it.
-        let can_apply =
-            self.changed() || hotkey_missing(&self.app.settings, self.app.active_hotkey);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        let can_apply = changed || hotkey_missing(&self.app.settings, self.app.active_hotkey);
+        // A fixed height: a right-to-left layout otherwise fills the rest of
+        // the panel, and the window could never shrink to fit.
+        let row = egui::vec2(ui.available_width(), ui.spacing().interact_size.y);
+        let layout = egui::Layout::right_to_left(egui::Align::Center);
+        ui.allocate_ui_with_layout(row, layout, |ui| {
             let apply = egui::Button::new(egui::RichText::new("Apply").color(egui::Color32::WHITE))
                 .fill(ACCENT)
                 .min_size(egui::vec2(84.0, 0.0));
             if ui.add_enabled(can_apply, apply).clicked() {
                 self.apply();
+                // The notices above are already drawn for this frame.
+                ui.ctx().request_repaint();
             }
             if ui
                 .add(egui::Button::new("Close").min_size(egui::vec2(84.0, 0.0)))
@@ -273,7 +289,7 @@ impl Window<'_> {
         });
     }
 
-    fn notices(&self, ui: &mut egui::Ui) {
+    fn notices(&self, ui: &mut egui::Ui, changed: bool) {
         let error = ui.visuals().error_fg_color;
         let warning = ui.visuals().warn_fg_color;
         for problem in [
@@ -289,13 +305,24 @@ impl Window<'_> {
         if let Some(problem) = &self.app.config_problem {
             notice(ui, warning, problem);
         }
-        if self.applied && !self.changed() && self.app.hotkey_problem.is_none() {
+        if self.applied && !changed && self.app.hotkey_problem.is_none() {
             let done = ui.visuals().text_color();
             notice(
                 ui,
                 done,
                 "Applied. New settings take effect from the next press.",
             );
+        }
+    }
+
+    /// Grows or shrinks the window to `height`, so a message never needs
+    /// scrolling to and no space sits empty below the buttons.
+    fn fit_height(&mut self, ctx: &egui::Context, height: f32) {
+        let current = ctx.input(|i| i.viewport().inner_rect.map(|r| r.height()));
+        let off = |h: Option<f32>| h.is_none_or(|h| (h - height).abs() > 1.0);
+        if off(current) && off(self.requested_height) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(WIDTH, height)));
+            self.requested_height = Some(height);
         }
     }
 
@@ -324,15 +351,6 @@ impl Window<'_> {
     }
 }
 
-/// Grows or shrinks the window to `height`, so a message never needs
-/// scrolling to and no space sits empty below the buttons.
-fn fit_height(ctx: &egui::Context, height: f32) {
-    let current = ctx.input(|i| i.viewport().inner_rect.map(|r| r.height()));
-    if current.is_some_and(|h| (h - height).abs() > 1.0) {
-        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(WIDTH, height)));
-    }
-}
-
 /// A titled, rounded panel holding a two-column grid of settings.
 fn card(ui: &mut egui::Ui, title: &str, rows: impl FnOnce(&mut egui::Ui)) {
     egui::Frame::new()
@@ -352,21 +370,29 @@ fn card(ui: &mut egui::Ui, title: &str, rows: impl FnOnce(&mut egui::Ui)) {
         });
 }
 
-/// A setting's name, followed by an info icon that explains it on hover.
+/// A setting's name, followed by an info icon. Hovering either, or tabbing
+/// to the icon, shows `help`.
 fn setting(ui: &mut egui::Ui, name: &str, help: &str) {
-    ui.horizontal(|ui| {
+    let row = ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
-        ui.label(name).on_hover_text(help);
-        info_icon(ui).on_hover_text(help);
+        ui.label(name);
+        info_icon(ui)
     });
+    if row.inner.has_focus() {
+        row.inner.show_tooltip_text(help);
+    }
+    row.response.on_hover_text(help);
 }
 
 /// A small circled "i".
 fn info_icon(ui: &mut egui::Ui) -> egui::Response {
     let size = 15.0;
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(size, size),
+        egui::Sense::focusable_noninteractive(),
+    );
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Image, true, "More information"));
-    let colour = if response.hovered() {
+    let colour = if response.hovered() || response.has_focus() {
         ACCENT
     } else {
         ui.visuals().weak_text_color()
