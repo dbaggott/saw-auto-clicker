@@ -30,7 +30,7 @@ struct FileIn {
     activation_delay_ms: Option<toml::Value>,
     jitter: Option<toml::Value>,
     /// What versions before 0.5.0 wrote for Jitter, read when `jitter` is
-    /// absent: any percentage above zero means on.
+    /// absent: any percentage above zero, up to their limit of 50, means on.
     jitter_percent: Option<toml::Value>,
     buttons: Option<toml::Value>,
     hotkey: Option<toml::Value>,
@@ -52,11 +52,22 @@ struct FileOut {
     enable_on_startup: bool,
 }
 
-const BUTTON_NAMES: [(ClickButtons, &str); 3] = [
-    (ClickButtons::Left, "left"),
-    (ClickButtons::Both, "both"),
-    (ClickButtons::Right, "right"),
-];
+fn button_name(buttons: ClickButtons) -> &'static str {
+    match buttons {
+        ClickButtons::Left => "left",
+        ClickButtons::Both => "both",
+        ClickButtons::Right => "right",
+    }
+}
+
+fn buttons_named(name: &str) -> Option<ClickButtons> {
+    match name {
+        "left" => Some(ClickButtons::Left),
+        "both" => Some(ClickButtons::Both),
+        "right" => Some(ClickButtons::Right),
+        _ => None,
+    }
+}
 
 /// What [`load`] read.
 #[derive(Debug, PartialEq)]
@@ -130,7 +141,7 @@ fn from_file(file: FileIn) -> Loaded {
         (None, Some(percent)) => pick(
             &mut problems,
             "jitter_percent",
-            Some(whole_in(&percent, 0..=100).map(|p| p > 0)),
+            Some(whole_in(&percent, 0..=50).map(|p| p > 0)),
             defaults.jitter,
         ),
         (jitter, _) => pick(
@@ -144,10 +155,8 @@ fn from_file(file: FileIn) -> Loaded {
         &mut problems,
         "buttons",
         file.buttons.map(|v| {
-            BUTTON_NAMES
-                .iter()
-                .find(|(_, name)| v.as_str() == Some(name))
-                .map(|&(buttons, _)| buttons)
+            v.as_str()
+                .and_then(buttons_named)
                 .ok_or_else(|| format!("must be \"left\", \"both\" or \"right\", got {v}"))
         }),
         defaults.buttons,
@@ -241,11 +250,7 @@ pub fn save(path: &Path, settings: &Settings, enable_on_startup: bool) -> io::Re
         cps: draft.cps,
         activation_delay_ms: draft.delay_ms,
         jitter: draft.jitter,
-        buttons: BUTTON_NAMES
-            .iter()
-            .find(|&&(buttons, _)| buttons == draft.buttons)
-            .map(|&(_, name)| name)
-            .expect("every choice has a name"),
+        buttons: button_name(draft.buttons),
         hotkey: draft
             .hotkey
             .map_or_else(String::new, |h| HotkeyText(h).to_string()),

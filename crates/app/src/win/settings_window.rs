@@ -18,6 +18,10 @@ use crate::win::butterfly;
 /// How often the open window checks for tray clicks and the clicker's
 /// reports.
 const POLL: Duration = Duration::from_millis(100);
+/// How long the hotkey controls must sit untouched before the hotkey they
+/// show is registered, so the combinations passed through while ticking
+/// modifiers are never registered themselves.
+const HOTKEY_SETTLE: f64 = 1.5;
 
 /// The icon's hub orange: its blade orange is too light to carry white text.
 const ACCENT: egui::Color32 = egui::Color32::from_rgb(
@@ -93,6 +97,7 @@ pub fn show(app: &mut App, close_after_frames: Option<u32>) -> Result<Next, Stri
                 app,
                 draft,
                 saved: draft,
+                hotkey_edited: None,
                 modifiers,
                 enable_on_startup,
                 hotkey_unusable: None,
@@ -160,6 +165,8 @@ struct Window<'a> {
     draft: Draft,
     /// The draft last put into effect; any difference from it is saved.
     saved: Draft,
+    /// When the hotkey controls last changed, as egui input time.
+    hotkey_edited: Option<f64>,
     /// The hotkey's modifiers as ticked, kept while no key is chosen.
     modifiers: Modifiers,
     enable_on_startup: bool,
@@ -218,6 +225,14 @@ impl eframe::App for Window<'_> {
         self.frames += 1;
         if self.close_after_frames.is_some_and(|n| self.frames >= n) {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+    }
+
+    /// Saves what a drag or the hotkey's settling time was still holding
+    /// back.
+    fn on_exit(&mut self) {
+        if self.draft != self.saved || self.enable_on_startup != self.app.enable_on_startup {
+            self.save(self.draft);
         }
     }
 }
@@ -282,6 +297,7 @@ impl Window<'_> {
         ui.add_space(4.0);
         card(ui, "Enabling and disabling", |ui| {
             setting(ui, "Toggle hotkey", HOTKEY_HELP);
+            let before = d.hotkey;
             ui.horizontal(|ui| {
                 let mut key: Option<Key> = d.hotkey.map(|h| h.key);
                 let m = &mut self.modifiers;
@@ -310,6 +326,9 @@ impl Window<'_> {
                     });
                 d.hotkey = key.map(|key| Hotkey { modifiers: *m, key });
             });
+            if d.hotkey != before {
+                self.hotkey_edited = Some(ui.input(|i| i.time));
+            }
             ui.end_row();
             setting(ui, "Enable on startup", ENABLE_ON_STARTUP_HELP);
             toggle(ui, &mut self.enable_on_startup, "Enable on startup");
@@ -332,7 +351,7 @@ impl Window<'_> {
                 && ui.button("Try the hotkey again").clicked();
         }
         if retry {
-            self.save();
+            self.save(self.saved);
         }
         if let Some(problem) = &self.app.save_problem {
             notice(ui, error, problem);
@@ -343,12 +362,22 @@ impl Window<'_> {
     }
 
     /// Saves whatever the controls changed. A slider's change is saved once
-    /// it is let go, not at every step of the drag.
+    /// it is let go, not at every step of the drag, and a hotkey once its
+    /// controls have settled.
     fn save_changes(&mut self, ctx: &egui::Context) {
-        let changed =
-            self.draft != self.saved || self.enable_on_startup != self.app.enable_on_startup;
+        let mut ready = self.draft;
+        if let Some(edited) = self.hotkey_edited {
+            let waited = ctx.input(|i| i.time) - edited;
+            if waited < HOTKEY_SETTLE {
+                ready.hotkey = self.saved.hotkey;
+                ctx.request_repaint_after(Duration::from_secs_f64(HOTKEY_SETTLE - waited));
+            } else {
+                self.hotkey_edited = None;
+            }
+        }
+        let changed = ready != self.saved || self.enable_on_startup != self.app.enable_on_startup;
         if changed && ctx.dragged_id().is_none() {
-            self.save();
+            self.save(ready);
             // The notices above are already drawn for this frame.
             ctx.request_repaint();
         }
@@ -365,11 +394,12 @@ impl Window<'_> {
         }
     }
 
-    /// Puts the draft into effect, keeping the hotkey in effect when the
-    /// chosen one can't be used, as while its modifiers are still being
-    /// ticked.
-    fn save(&mut self) {
-        let hotkey = match self.draft.hotkey.map(hotkey_text::usable).transpose() {
+    /// Puts `draft` into effect, keeping the hotkey in effect when the
+    /// chosen one can't be used. A refused hotkey stays in the controls, with
+    /// the notice naming the one still in effect, so the user can carry on
+    /// editing it.
+    fn save(&mut self, draft: Draft) {
+        let hotkey = match draft.hotkey.map(hotkey_text::usable).transpose() {
             Ok(hotkey) => {
                 self.hotkey_unusable = None;
                 hotkey
@@ -379,21 +409,11 @@ impl Window<'_> {
                 self.app.settings.hotkey()
             }
         };
-        let requested = Draft {
-            hotkey,
-            ..self.draft
-        }
-        .to_settings()
-        .expect("the controls keep every value in range");
+        let requested = Draft { hotkey, ..draft }
+            .to_settings()
+            .expect("the controls keep every value in range");
         self.app.apply_settings(requested, self.enable_on_startup);
-        if self.hotkey_unusable.is_none() && self.app.hotkey_problem.is_some() {
-            // Refused: show the hotkey still in effect.
-            self.draft.hotkey = self.app.settings.hotkey();
-            if let Some(hotkey) = self.draft.hotkey {
-                self.modifiers = hotkey.modifiers;
-            }
-        }
-        self.saved = self.draft;
+        self.saved = draft;
     }
 }
 

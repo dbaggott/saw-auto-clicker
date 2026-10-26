@@ -57,8 +57,9 @@ pub enum Next {
     Quit,
 }
 
-/// Whether settings are written to the settings file. The self-test enables
-/// even when that file says not to, and never writes it.
+/// Whether the app leaves anything behind: the settings file, the Start at
+/// login value, and the signal a second launch sends. The self-test enables
+/// even when the settings file says not to, and touches none of them.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Persist {
     Yes,
@@ -102,10 +103,12 @@ impl App {
             events: events_tx,
             thread_id: unsafe { GetCurrentThreadId() },
         };
-        let show_to_main = to_main.clone();
-        // Without it a second launch shows a message instead of this
-        // window, so the app carries on.
-        let _ = listen_for_show_settings(move || show_to_main.send(Event::ShowSettings));
+        if persist == Persist::Yes {
+            let show_to_main = to_main.clone();
+            // Without it a second launch shows a message instead of this
+            // window, so the app carries on.
+            let _ = listen_for_show_settings(move || show_to_main.send(Event::ShowSettings));
+        }
         let status_to_main = to_main.clone();
         let mut watch = BurstWatch::default();
         let clicker = Clicker::start(
@@ -130,7 +133,7 @@ impl App {
         let start_at_login = StartAtLogin::for_this_user();
         // On failure an older value keeps opening the settings window at
         // sign-in, which is all it costs.
-        if let Ok(exe) = std::env::current_exe() {
+        if let (Persist::Yes, Ok(exe)) = (persist, std::env::current_exe()) {
             let _ = start_at_login.update(&exe);
         }
         let tray_state = TrayState {
