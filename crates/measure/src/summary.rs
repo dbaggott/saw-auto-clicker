@@ -108,9 +108,9 @@ impl fmt::Display for Report<'_> {
         let info = &self.0.info;
         writeln!(
             f,
-            "target {} CPS, Jitter {}%, delay {} ms, execution-speed opt-out {}, timer-resolution opt-out {}",
+            "target {} CPS, Jitter {}, delay {} ms, execution-speed opt-out {}, timer-resolution opt-out {}",
             info.cps,
-            info.jitter_percent,
+            on_off(info.jitter),
             info.delay_ms,
             on_off(info.execution_speed_opt_out),
             on_off(info.timer_resolution_opt_out),
@@ -156,7 +156,7 @@ mod tests {
         Log {
             info: RunInfo {
                 cps: 10,
-                jitter_percent: 0,
+                jitter: false,
                 delay_ms: 250,
                 execution_speed_opt_out: true,
                 timer_resolution_opt_out: true,
@@ -255,6 +255,6 @@ mod tests {
             report.contains("11 clicks, mean rate 10.53 CPS (+5.3% vs target)"),
             "{report}"
         );
-        assert!(report.starts_with("target 10 CPS, Jitter 0%"), "{report}");
+        assert!(report.starts_with("target 10 CPS, Jitter off"), "{report}");
     }
 }

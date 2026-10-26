@@ -1,6 +1,6 @@
 //! The tray icon, drawn at startup so the app ships no image files: a saw
 //! blade, orange with a small pointer whose tip sits on its centre when
-//! armed, and grey without the pointer when disarmed, so the states differ in
+//! enabled, and grey without the pointer when disabled, so the states differ in
 //! shape as well as colour (R14).
 //!
 //! The drawing uses only arithmetic and comparisons, which IEEE 754 rounds
@@ -49,16 +49,16 @@ struct Look {
     pointer: bool,
 }
 
-/// The armed hub's orange, which the settings window takes as its accent.
-pub const ARMED_HUB: [u8; 3] = [0xc4, 0x50, 0x0f];
+/// The enabled hub's orange, which the settings window takes as its accent.
+pub const ENABLED_HUB: [u8; 3] = [0xc4, 0x50, 0x0f];
 
-const ARMED: Look = Look {
+const ENABLED: Look = Look {
     blade: [0xf2, 0x6b, 0x1d],
-    hub: ARMED_HUB,
+    hub: ENABLED_HUB,
     arbor: [0x2a, 0x0e, 0x02],
     pointer: true,
 };
-const DISARMED: Look = Look {
+const DISABLED: Look = Look {
     blade: [0x8c, 0x8c, 0x8c],
     hub: [0x6e, 0x6e, 0x6e],
     arbor: [0x1e, 0x1e, 0x1e],
@@ -70,14 +70,14 @@ const DISARMED: Look = Look {
 const SAMPLES: u32 = 4;
 
 /// Straight (not premultiplied) RGBA, row by row from the top.
-pub fn rgba(armed: bool) -> Vec<u8> {
-    rgba_at(SIZE, armed)
+pub fn rgba(enabled: bool) -> Vec<u8> {
+    rgba_at(SIZE, enabled)
 }
 
 /// [`rgba`] drawn at `size` pixels square. The executable's icon is a file
 /// drawn from this, `assets/saw-auto-clicker.ico`, which a test keeps in step.
-pub fn rgba_at(size: u32, armed: bool) -> Vec<u8> {
-    let look = if armed { &ARMED } else { &DISARMED };
+pub fn rgba_at(size: u32, enabled: bool) -> Vec<u8> {
+    let look = if enabled { &ENABLED } else { &DISABLED };
     let blade = blade_outline();
     let scale = UNITS / f64::from(size);
     let samples = SAMPLES * SAMPLES;
@@ -189,34 +189,34 @@ mod tests {
 
     #[test]
     fn both_icons_are_full_size() {
-        for armed in [false, true] {
-            assert_eq!(rgba(armed).len(), (SIZE * SIZE * 4) as usize);
+        for enabled in [false, true] {
+            assert_eq!(rgba(enabled).len(), (SIZE * SIZE * 4) as usize);
         }
     }
 
     #[test]
-    fn only_armed_has_the_pointer_and_the_blades_differ_in_colour() {
-        let (armed, disarmed) = (rgba(true), rgba(false));
-        assert_eq!(pixel_at(&armed, 0, 0)[3], 0);
-        assert_eq!(pixel_at(&disarmed, 0, 0)[3], 0);
-        let blade = pixel_at(&armed, 5, 16);
+    fn only_enabled_has_the_pointer_and_the_blades_differ_in_colour() {
+        let (enabled, disabled) = (rgba(true), rgba(false));
+        assert_eq!(pixel_at(&enabled, 0, 0)[3], 0);
+        assert_eq!(pixel_at(&disabled, 0, 0)[3], 0);
+        let blade = pixel_at(&enabled, 5, 16);
         assert_eq!(blade[3], 255);
-        assert_ne!(blade, pixel_at(&disarmed, 5, 16));
-        // Below and right of the centre: the pointer when armed, the hub when
-        // disarmed.
-        assert_eq!(pixel_at(&armed, 17, 20), [0xff, 0xff, 0xff, 0xff]);
-        assert_eq!(pixel_at(&disarmed, 17, 20), [0x6e, 0x6e, 0x6e, 0xff]);
+        assert_ne!(blade, pixel_at(&disabled, 5, 16));
+        // Below and right of the centre: the pointer when enabled, the hub when
+        // disabled.
+        assert_eq!(pixel_at(&enabled, 17, 20), [0xff, 0xff, 0xff, 0xff]);
+        assert_eq!(pixel_at(&disabled, 17, 20), [0x6e, 0x6e, 0x6e, 0xff]);
     }
 
     /// The executable's and the installer's icon.
     const ICON_FILE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/saw-auto-clicker.ico");
 
-    /// The armed icon at the sizes Windows asks for most: 16 in lists, the
+    /// The enabled icon at the sizes Windows asks for most: 16 in lists, the
     /// tray's size, 48 in Explorer, 256 for large icons.
     const ICON_FILE_SIZES: [u32; 4] = [16, SIZE, 48, 256];
 
     #[test]
-    fn the_icon_file_is_the_armed_icon() {
+    fn the_icon_file_is_the_enabled_icon() {
         let file = File::open(ICON_FILE).expect("the icon file opens");
         let icons = ico::IconDir::read(file).expect("the icon file decodes");
         let sizes: Vec<u32> = icons.entries().iter().map(|entry| entry.width()).collect();

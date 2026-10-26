@@ -6,13 +6,13 @@ use fastrand::Rng;
 use crate::backend::{Inject, Observe};
 use crate::clock::{Clock, Time};
 use crate::gate::{Button, ButtonEvent, Direction, Source};
-use crate::jitter::{Cycle, Grid, MIN_PHASE};
+use crate::jitter::{Cycle, Grid, HUMAN_JITTER, MIN_PHASE};
 use crate::settings::Settings;
 
 /// The floor on how long an injection may go unechoed before the observation
 /// counts as dead (D8); the timeout is this or twice the interval.
 const MIN_LIVENESS_TIMEOUT: Duration = Duration::from_millis(250);
-/// How often the observation is replaced while armed and idle (D8).
+/// How often the observation is replaced while enabled and idle (D8).
 const IDLE_REINSTALL_PERIOD: Duration = Duration::from_secs(60);
 /// How long shutdown waits for a final tagged down to echo (D7).
 const QUIT_GRACE: Duration = Duration::from_millis(100);
@@ -21,8 +21,8 @@ const QUIT_GRACE: Duration = Duration::from_millis(100);
 #[derive(Debug)]
 pub(crate) enum Input {
     Observed(ButtonEvent),
-    SetArmed(bool),
-    ToggleArmed,
+    SetEnabled(bool),
+    ToggleEnabled,
     SetSettings(Settings),
     Shutdown,
 }
@@ -30,8 +30,8 @@ pub(crate) enum Input {
 /// Changes the app shows the user, reported to the owner's status callback.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Status {
-    Armed,
-    Disarmed,
+    Enabled,
+    Disabled,
     /// A burst did not start, or ended, because the window under the cursor
     /// can't be injected into (R16).
     TargetNotInjectable(Button),
@@ -84,7 +84,8 @@ struct InFlight {
 impl Burst {
     fn new(start: Time, settings: &Settings, rng: Rng) -> Burst {
         let interval = settings.interval();
-        let mut grid = Grid::new(start, interval, settings.jitter(), rng);
+        let jitter = if settings.jitter() { HUMAN_JITTER } else { 0.0 };
+        let mut grid = Grid::new(start, interval, jitter, rng);
         let cycle = grid.next_cycle();
         Burst {
             grid,
@@ -124,7 +125,7 @@ impl Burst {
 pub(crate) struct Scheduler<B> {
     backend: B,
     settings: Settings,
-    armed: bool,
+    enabled: bool,
     tracks: [Track; 2],
     rng: Rng,
     last_reinstall: Time,
@@ -142,7 +143,7 @@ impl<B: Observe + Inject> Scheduler<B> {
         Scheduler {
             backend,
             settings,
-            armed: false,
+            enabled: false,
             tracks: [Track::Idle, Track::Idle],
             rng,
             last_reinstall: Time::ZERO,
@@ -179,8 +180,8 @@ impl<B: Observe + Inject> Scheduler<B> {
     fn handle(&mut self, input: Input, now: Time) {
         match input {
             Input::Observed(event) => self.observed(event, now),
-            Input::SetArmed(armed) => self.set_armed(armed, now),
-            Input::ToggleArmed => self.set_armed(!self.armed, now),
+            Input::SetEnabled(enabled) => self.set_enabled(enabled, now),
+            Input::ToggleEnabled => self.set_enabled(!self.enabled, now),
             Input::SetSettings(settings) => self.settings = settings,
             Input::Shutdown => self.begin_quit(now),
         }
@@ -189,14 +190,17 @@ impl<B: Observe + Inject> Scheduler<B> {
     fn observed(&mut self, event: ButtonEvent, now: Time) {
         let track = &mut self.tracks[event.button.index()];
         match (event.source, event.direction) {
-            (Source::Physical, Direction::Down) => {
-                if self.quit_by.is_none() {
-                    *track = Track::Pending {
+            (Source::Physical, Direction::Down) if self.quit_by.is_none() => {
+                *track = if self.settings.buttons().includes(event.button) {
+                    Track::Pending {
                         delay_ends: now + self.settings.activation_delay(),
                         settings: self.settings.clone(),
-                    };
-                }
+                    }
+                } else {
+                    Track::Held
+                };
             }
+            (Source::Physical, Direction::Down) => {}
             (Source::Physical, Direction::Up) => *track = Track::Idle,
             (Source::Tagged, direction) => match track {
                 Track::Burst(burst) => burst.echoed(direction, now),
@@ -213,24 +217,24 @@ impl<B: Observe + Inject> Scheduler<B> {
         }
     }
 
-    fn set_armed(&mut self, armed: bool, now: Time) {
-        if armed == self.armed || self.quit_by.is_some() {
+    fn set_enabled(&mut self, enabled: bool, now: Time) {
+        if enabled == self.enabled || self.quit_by.is_some() {
             return;
         }
-        self.armed = armed;
-        // A press that spans the change starts no burst. Disarming stops
-        // bursts at once (R2); arming leaves a press already held alone,
+        self.enabled = enabled;
+        // A press that spans the change starts no burst. Disabling stops
+        // bursts at once (R2); enabling leaves a press already held alone,
         // because the reinstall below could lose its release.
         for track in &mut self.tracks {
             if matches!(track, Track::Burst(_) | Track::Pending { .. }) {
                 *track = Track::Held;
             }
         }
-        if armed {
+        if enabled {
             self.reinstall(now);
-            (self.on_status)(Status::Armed);
+            (self.on_status)(Status::Enabled);
         } else {
-            (self.on_status)(Status::Disarmed);
+            (self.on_status)(Status::Disabled);
         }
     }
 
@@ -293,7 +297,7 @@ impl<B: Observe + Inject> Scheduler<B> {
             .tracks
             .iter()
             .all(|t| matches!(t, Track::Idle | Track::Held));
-        if self.armed && idle {
+        if self.enabled && idle {
             if now >= self.last_reinstall + IDLE_REINSTALL_PERIOD {
                 self.reinstall(now);
             }
@@ -316,7 +320,7 @@ impl<B: Observe + Inject> Scheduler<B> {
                 if now < start {
                     return Some(start);
                 }
-                if !self.armed {
+                if !self.enabled {
                     *track = Track::Held;
                     return None;
                 }

@@ -1,5 +1,5 @@
 //! Runs `saw-app --self-test` on a real Windows desktop: the app starts,
-//! creates its tray icon, arms, opens and closes its settings window twice,
+//! creates its tray icon, enables, opens and closes its settings window twice,
 //! and quits cleanly.
 #![cfg(windows)]
 

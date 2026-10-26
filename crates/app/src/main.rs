@@ -1,4 +1,4 @@
-//! saw-auto-clicker's tray app: arms the clicker at launch on the first run
+//! saw-auto-clicker's tray app: enables the clicker at launch on the first run
 //! or when set to, shows its state in the notification area, and keeps its
 //! settings in a per-user file.
 

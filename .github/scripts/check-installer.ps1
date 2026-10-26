@@ -83,10 +83,11 @@ if ($process.ExitCode -ne 0 -or $reported -ne "saw-app $workspaceVersion") {
     Fail "expected exit code 0 and 'saw-app $workspaceVersion'"
 }
 
-Write-Host '== the Run value holds the quoted installed path'
+Write-Host '== the Run value holds the quoted installed path and --at-login'
 $command = Get-RunCommand
+$expectedCommand = "`"$installedExe`" --at-login"
 Write-Host "Run value: $command"
-if ($command -ne "`"$installedExe`"") { Fail "expected `"$installedExe`"" }
+if ($command -ne $expectedCommand) { Fail "expected $expectedCommand" }
 
 Write-Host '== uninstall silently'
 $code = Invoke-Setup (Join-Path $installDir 'unins000.exe') @(

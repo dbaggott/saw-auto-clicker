@@ -4,10 +4,10 @@ use crate::log::RunInfo;
 
 pub const USAGE: &str = "\
 usage:
-  saw-measure run --cps <1-50> [--jitter <0-50>] [--delay <50-2000>] [--log <file>]
+  saw-measure run --cps <1-50> [--jitter] [--delay <50-2000>] [--log <file>]
                   [--no-execution-speed-opt-out] [--no-timer-resolution-opt-out]
-      Arms at once and logs every click applications receive until Ctrl+C,
-      then prints the summary. Jitter is a percentage, the delay is in ms.
+      Enables at once and logs every click applications receive until Ctrl+C,
+      then prints the summary. --jitter turns Jitter on; the delay is in ms.
       The log defaults to saw-measure.log in the current directory.
   saw-measure summary <file>
       Prints the mean rate and interval spread of each hold in a log.";
@@ -36,7 +36,7 @@ fn parse_run(args: &[String]) -> Result<Command, String> {
     let mut cps = None;
     let mut info = RunInfo {
         cps: 0,
-        jitter_percent: 0,
+        jitter: false,
         delay_ms: 250,
         execution_speed_opt_out: true,
         timer_resolution_opt_out: true,
@@ -56,7 +56,7 @@ fn parse_run(args: &[String]) -> Result<Command, String> {
         }
         match flag.as_str() {
             "--cps" => cps = Some(number(flag, value()?)?),
-            "--jitter" => info.jitter_percent = number(flag, value()?)?,
+            "--jitter" => info.jitter = true,
             "--delay" => info.delay_ms = number(flag, value()?)?,
             "--log" => log = value()?.into(),
             "--no-execution-speed-opt-out" => info.execution_speed_opt_out = false,
@@ -83,7 +83,7 @@ mod tests {
             Ok(Command::Run {
                 info: RunInfo {
                     cps: 20,
-                    jitter_percent: 0,
+                    jitter: false,
                     delay_ms: 250,
                     execution_speed_opt_out: true,
                     timer_resolution_opt_out: true,
@@ -97,12 +97,12 @@ mod tests {
     fn run_takes_every_option() {
         assert_eq!(
             parse(&args(
-                "run --jitter 30 --cps 50 --delay 300 --log a.log --no-execution-speed-opt-out --no-timer-resolution-opt-out"
+                "run --jitter --cps 50 --delay 300 --log a.log --no-execution-speed-opt-out --no-timer-resolution-opt-out"
             )),
             Ok(Command::Run {
                 info: RunInfo {
                     cps: 50,
-                    jitter_percent: 30,
+                    jitter: true,
                     delay_ms: 300,
                     execution_speed_opt_out: false,
                     timer_resolution_opt_out: false,

@@ -4,6 +4,11 @@ use fastrand::Rng;
 
 use crate::clock::Time;
 
+/// The Jitter a burst runs with when Jitter is on. Consecutive downs then
+/// vary with a standard deviation of J/√6 ≈ 16% of the interval, roughly the
+/// spread of a person clicking as fast as they can.
+pub(crate) const HUMAN_JITTER: f64 = 0.4;
+
 /// The shortest the button spends up, or down, in one click (D5).
 pub(crate) const MIN_PHASE: Duration = Duration::from_millis(2);
 

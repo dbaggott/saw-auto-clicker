@@ -6,21 +6,29 @@
 use std::time::Duration;
 
 use eframe::egui;
-use saw_core::{CPS_RANGE, Hotkey, Key, Modifiers};
+use saw_core::{BUTTERFLY_CPS, CPS_RANGE, ClickButtons, Hotkey, Key, Modifiers};
 
 use crate::form::{self, Draft};
 use crate::hotkey_text::{self, KEYS, key_name};
 use crate::icon;
 use crate::status::hotkey_missing;
 use crate::win::app::{App, Next};
+use crate::win::butterfly;
 
 /// How often the open window checks for tray clicks and the clicker's
 /// reports.
 const POLL: Duration = Duration::from_millis(100);
+/// How long the hotkey controls must sit untouched before the hotkey they
+/// show is registered, so the combinations passed through while ticking
+/// modifiers are never registered themselves.
+const HOTKEY_SETTLE: f64 = 1.5;
 
 /// The icon's hub orange: its blade orange is too light to carry white text.
-const ACCENT: egui::Color32 =
-    egui::Color32::from_rgb(icon::ARMED_HUB[0], icon::ARMED_HUB[1], icon::ARMED_HUB[2]);
+const ACCENT: egui::Color32 = egui::Color32::from_rgb(
+    icon::ENABLED_HUB[0],
+    icon::ENABLED_HUB[1],
+    icon::ENABLED_HUB[2],
+);
 
 const WIDTH: f32 = 540.0;
 const MARGIN: i8 = 16;
@@ -28,14 +36,13 @@ const MARGIN: i8 = 16;
 const CPS_HELP: &str = "The target clicks per second when auto-clicking.";
 const DELAY_HELP: &str =
     "The amount of time you must hold down a click before auto-clicking starts.";
-const JITTER_HELP: &str = "Adds some randomness to the time between clicks so \
-that they aren't perfectly uniform. The overall clicks per second stays the \
-same.\n\nAt 0% every click is evenly spaced. At 50%, each gap can be anywhere \
-from half to one and a half times its usual length.";
-const HOTKEY_HELP: &str = "An optional keyboard shortcut that arms and disarms auto-clicking.";
-const ARM_ON_STARTUP_HELP: &str = "By default, the app starts disarmed to prevent \
+const JITTER_HELP: &str = "Adds natural variation to the click rate.";
+const CLICKS_HELP: &str = "Which mouse buttons auto-click when held down. A \
+button that is left out always clicks normally.";
+const HOTKEY_HELP: &str = "An optional keyboard shortcut that enables and disables auto-clicking.";
+const ENABLE_ON_STARTUP_HELP: &str = "By default, the app starts disabled to prevent \
 accidental auto-clicking. Select this if you want the auto-clicker to \
-automatically arm itself on startup.";
+automatically enable itself on startup.";
 
 /// Shows the window until it closes, and says whether Quit was chosen from
 /// the tray meanwhile. `close_after_frames` closes it by itself once it has
@@ -59,7 +66,7 @@ pub fn show(app: &mut App, close_after_frames: Option<u32>) -> Result<Next, Stri
     };
     let mut next = Next::Wait;
     let draft = Draft::from(&app.settings);
-    let arm_on_startup = app.arm_on_startup;
+    let enable_on_startup = app.enable_on_startup;
     let modifiers = draft.hotkey.map_or(
         // What a newly chosen key starts with.
         Modifiers {
@@ -77,10 +84,12 @@ pub fn show(app: &mut App, close_after_frames: Option<u32>) -> Result<Next, Stri
             Ok(Box::new(Window {
                 app,
                 draft,
+                saved: draft,
+                hotkey_edited: None,
                 modifiers,
-                arm_on_startup,
-                applied: false,
-                apply_problem: None,
+                enable_on_startup,
+                hotkey_unusable: None,
+                flap_started: None,
                 next: &mut next,
                 requested_height: None,
                 frames: 0,
@@ -139,15 +148,19 @@ fn style(ctx: &egui::Context) {
 
 struct Window<'a> {
     app: &'a mut App,
-    /// Its hotkey is `None` while no key is chosen.
+    /// What the controls show. Its hotkey is `None` while no key is chosen.
     draft: Draft,
+    /// The draft last put into effect; any difference from it is saved.
+    saved: Draft,
+    /// When the hotkey controls last changed, as egui input time.
+    hotkey_edited: Option<f64>,
     /// The hotkey's modifiers as ticked, kept while no key is chosen.
     modifiers: Modifiers,
-    arm_on_startup: bool,
-    /// Whether the last Apply went through, for its confirmation line.
-    applied: bool,
-    /// Why the last Apply was refused before reaching the app.
-    apply_problem: Option<String>,
+    enable_on_startup: bool,
+    /// Why the hotkey the controls show can't be used, while the one before
+    /// it stays in effect.
+    hotkey_unusable: Option<String>,
+    flap_started: Option<f64>,
     next: &'a mut Next,
     /// The height last asked of the window, so a size the OS won't grant is
     /// asked for once rather than every frame.
@@ -178,42 +191,80 @@ impl eframe::App for Window<'_> {
                 // the window.
                 ui.vertical(|ui| {
                     self.settings(ui);
-                    let changed = self.changed();
-                    self.notices(ui, changed);
-                    ui.add_space(12.0);
-                    self.buttons(ui, changed);
+                    self.notices(ui);
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new("Changes are saved as you make them.")
+                            .small()
+                            .weak(),
+                    );
                 })
                 .response
                 .rect
                 .bottom()
             })
             .inner;
+        self.save_changes(ui.ctx());
         self.fit_height(ui.ctx(), bottom + f32::from(MARGIN));
         self.frames += 1;
         if self.close_after_frames.is_some_and(|n| self.frames >= n) {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
         }
     }
+
+    /// Saves what a drag or the hotkey's settling time was still holding
+    /// back.
+    fn on_exit(&mut self) {
+        if self.draft != self.saved || self.enable_on_startup != self.app.enable_on_startup {
+            self.save(self.draft);
+        }
+    }
 }
 
 impl Window<'_> {
     fn settings(&mut self, ui: &mut egui::Ui) {
-        let (delay_ms, jitter_percent) = (form::delay_ms_range(), form::jitter_percent_range());
+        let delay_ms = form::delay_ms_range();
         let d = &mut self.draft;
         card(ui, "Clicking", |ui| {
             setting(ui, "Clicks per second", CPS_HELP);
-            ui.add(egui::Slider::new(&mut d.cps, CPS_RANGE));
+            ui.horizontal(|ui| {
+                ui.add(egui::Slider::new(&mut d.cps, CPS_RANGE));
+                let on = d.butterfly();
+                let butterfly = butterfly::button(ui, on, &mut self.flap_started, ACCENT);
+                show_help(&butterfly, &butterfly, &butterfly_help(on));
+                if butterfly.clicked() && !on {
+                    d.set_butterfly();
+                }
+            });
             ui.end_row();
             setting(ui, "Activation delay", DELAY_HELP);
             ui.add(egui::Slider::new(&mut d.delay_ms, delay_ms).suffix(" ms"));
             ui.end_row();
             setting(ui, "Jitter", JITTER_HELP);
-            ui.add(egui::Slider::new(&mut d.jitter_percent, jitter_percent).suffix("%"));
+            toggle(ui, &mut d.jitter, "Jitter");
+            ui.end_row();
+            setting(ui, "Clicks", CLICKS_HELP);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                for (choice, name) in [
+                    (ClickButtons::Left, "Left only"),
+                    (ClickButtons::Both, "Both"),
+                    (ClickButtons::Right, "Right only"),
+                ] {
+                    let button = egui::Button::new(name)
+                        .selected(d.buttons == choice)
+                        .min_size(egui::vec2(84.0, 0.0));
+                    if ui.add(button).clicked() {
+                        d.buttons = choice;
+                    }
+                }
+            });
             ui.end_row();
         });
         ui.add_space(4.0);
-        card(ui, "Arming", |ui| {
+        card(ui, "Enabling and disabling", |ui| {
             setting(ui, "Toggle hotkey", HOTKEY_HELP);
+            let before = d.hotkey;
             ui.horizontal(|ui| {
                 let mut key: Option<Key> = d.hotkey.map(|h| h.key);
                 let m = &mut self.modifiers;
@@ -242,72 +293,65 @@ impl Window<'_> {
                     });
                 d.hotkey = key.map(|key| Hotkey { modifiers: *m, key });
             });
+            if d.hotkey != before {
+                self.hotkey_edited = Some(ui.input(|i| i.time));
+            }
             ui.end_row();
-            setting(ui, "Arm on startup", ARM_ON_STARTUP_HELP);
-            toggle(ui, &mut self.arm_on_startup, "Arm on startup");
+            setting(ui, "Enable on startup", ENABLE_ON_STARTUP_HELP);
+            toggle(ui, &mut self.enable_on_startup, "Enable on startup");
             ui.end_row();
         });
     }
 
-    fn changed(&self) -> bool {
-        self.draft != Draft::from(&self.app.settings)
-            || self.arm_on_startup != self.app.arm_on_startup
-    }
-
-    fn buttons(&mut self, ui: &mut egui::Ui, changed: bool) {
-        // With the chosen hotkey refused, applying unchanged settings retries
-        // it.
-        let can_apply = changed || hotkey_missing(&self.app.settings, self.app.active_hotkey);
-        // A fixed height: a right-to-left layout otherwise fills the rest of
-        // the panel, and the window could never shrink to fit.
-        let row = egui::vec2(ui.available_width(), ui.spacing().interact_size.y);
-        let layout = egui::Layout::right_to_left(egui::Align::Center);
-        ui.allocate_ui_with_layout(row, layout, |ui| {
-            let apply = egui::Button::new(egui::RichText::new("Apply").color(egui::Color32::WHITE))
-                .fill(ACCENT)
-                .min_size(egui::vec2(84.0, 0.0));
-            if ui.add_enabled(can_apply, apply).clicked() {
-                self.apply();
-                // The notices above are already drawn for this frame.
-                ui.ctx().request_repaint();
-            }
-            if ui
-                .add(egui::Button::new("Close").min_size(egui::vec2(84.0, 0.0)))
-                .clicked()
-            {
-                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
-            }
-        });
-    }
-
-    fn notices(&self, ui: &mut egui::Ui, changed: bool) {
+    fn notices(&mut self, ui: &mut egui::Ui) {
         let error = ui.visuals().error_fg_color;
         let warning = ui.visuals().warn_fg_color;
-        for problem in [
-            &self.apply_problem,
-            &self.app.hotkey_problem,
-            &self.app.save_problem,
-        ]
-        .into_iter()
-        .flatten()
-        {
+        if let Some(problem) = &self.hotkey_unusable {
+            notice(ui, error, problem);
+        }
+        let mut retry = false;
+        if let Some(problem) = &self.app.hotkey_problem {
+            notice(ui, error, problem);
+            // A hotkey refused at startup has no change of the user's to
+            // retry it.
+            retry = hotkey_missing(&self.app.settings, self.app.active_hotkey)
+                && ui.button("Try the hotkey again").clicked();
+        }
+        if retry {
+            self.save(self.saved);
+        }
+        if let Some(problem) = &self.app.save_problem {
             notice(ui, error, problem);
         }
         if let Some(problem) = &self.app.config_problem {
             notice(ui, warning, problem);
         }
-        if self.applied && !changed && self.app.hotkey_problem.is_none() {
-            let done = ui.visuals().text_color();
-            notice(
-                ui,
-                done,
-                "Applied. New settings take effect from the next press.",
-            );
+    }
+
+    /// Saves whatever the controls changed. A slider's change is saved once
+    /// it is let go, not at every step of the drag, and a hotkey once its
+    /// controls have settled.
+    fn save_changes(&mut self, ctx: &egui::Context) {
+        let mut ready = self.draft;
+        if let Some(edited) = self.hotkey_edited {
+            let waited = ctx.input(|i| i.time) - edited;
+            if waited < HOTKEY_SETTLE {
+                ready.hotkey = self.saved.hotkey;
+                ctx.request_repaint_after(Duration::from_secs_f64(HOTKEY_SETTLE - waited));
+            } else {
+                self.hotkey_edited = None;
+            }
+        }
+        let changed = ready != self.saved || self.enable_on_startup != self.app.enable_on_startup;
+        if changed && ctx.dragged_id().is_none() {
+            self.save(ready);
+            // The notices above are already drawn for this frame.
+            ctx.request_repaint();
         }
     }
 
     /// Grows or shrinks the window to `height`, so a message never needs
-    /// scrolling to and no space sits empty below the buttons.
+    /// scrolling to and no space sits empty below the settings.
     fn fit_height(&mut self, ctx: &egui::Context, height: f32) {
         let current = ctx.input(|i| i.viewport().inner_rect.map(|r| r.height()));
         let off = |h: Option<f32>| h.is_none_or(|h| (h - height).abs() > 1.0);
@@ -317,28 +361,38 @@ impl Window<'_> {
         }
     }
 
-    fn apply(&mut self) {
-        let checked = self
-            .draft
-            .hotkey
-            .map_or(Ok(()), |h| hotkey_text::usable(h).map(|_| ()))
-            .and_then(|()| self.draft.to_settings().map_err(|e| e.to_string()));
-        match checked {
-            Ok(settings) => {
-                self.app.apply_settings(settings, self.arm_on_startup);
-                self.apply_problem = None;
-                self.applied = true;
-                // A refused hotkey shows the one still in effect.
-                self.draft = Draft::from(&self.app.settings);
-                if let Some(hotkey) = self.draft.hotkey {
-                    self.modifiers = hotkey.modifiers;
-                }
+    /// Puts `draft` into effect, keeping the hotkey in effect when the
+    /// chosen one can't be used. A refused hotkey stays in the controls, with
+    /// the notice naming the one still in effect, so the user can carry on
+    /// editing it.
+    fn save(&mut self, draft: Draft) {
+        let hotkey = match draft.hotkey.map(hotkey_text::usable).transpose() {
+            Ok(hotkey) => {
+                self.hotkey_unusable = None;
+                hotkey
             }
             Err(why) => {
-                self.apply_problem = Some(why);
-                self.applied = false;
+                self.hotkey_unusable = Some(why);
+                self.app.settings.hotkey()
             }
-        }
+        };
+        let requested = Draft { hotkey, ..draft }
+            .to_settings()
+            .expect("the controls keep every value in range");
+        self.app.apply_settings(requested, self.enable_on_startup);
+        self.saved = draft;
+    }
+}
+
+fn butterfly_help(on: bool) -> String {
+    let what = format!(
+        "Simulates the human-achievable clicks per second from butterfly \
+         clicking: {BUTTERFLY_CPS} clicks per second, with Jitter on."
+    );
+    if on {
+        format!("{what}\n\nButterfly clicking is on.")
+    } else {
+        what
     }
 }
 
@@ -369,10 +423,16 @@ fn setting(ui: &mut egui::Ui, name: &str, help: &str) {
         ui.label(name);
         info_icon(ui)
     });
-    if row.inner.has_focus() {
-        row.inner.show_tooltip_text(help);
+    show_help(&row.response, &row.inner, help);
+}
+
+/// Shows `help` under `hovered` while the pointer is on it or `focused` has
+/// the keyboard focus. Unlike egui's hover text, a click doesn't hide it:
+/// the info icon looks clickable, so people click it.
+fn show_help(hovered: &egui::Response, focused: &egui::Response, help: &str) {
+    if hovered.contains_pointer() || focused.has_focus() {
+        hovered.show_tooltip_text(help);
     }
-    row.response.on_hover_text(help);
 }
 
 /// A small circled "i".
@@ -435,8 +495,7 @@ fn toggle(ui: &mut egui::Ui, on: &mut bool, name: &str) -> egui::Response {
     response
 }
 
-/// One message between the settings and the buttons, on a tint of its
-/// colour.
+/// One message below the settings, on a tint of its colour.
 fn notice(ui: &mut egui::Ui, colour: egui::Color32, text: &str) {
     ui.add_space(4.0);
     egui::Frame::new()

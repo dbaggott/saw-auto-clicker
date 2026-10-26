@@ -13,7 +13,7 @@ use crate::scheduler::{Input, Status};
 const LEFT: Button = Button::Left;
 
 fn holding_left() -> Sim {
-    let mut sim = Sim::armed(settings(10, 250, 0.0));
+    let mut sim = Sim::enabled(settings(10, 250, false));
     sim.press(LEFT, at_ms(0));
     sim
 }
@@ -80,28 +80,28 @@ fn release_while_a_down_is_in_flight_tagged_down_first() {
     assert_eq!(final_up_source(&sim), Source::Physical);
 }
 
-fn disarmed_mid_burst(disarm: Time) -> Sim {
+fn disabled_mid_burst(disable: Time) -> Sim {
     let mut sim = holding_left();
-    sim.control_at(disarm, Input::SetArmed(false));
+    sim.control_at(disable, Input::SetEnabled(false));
     sim.release(LEFT, at_ms(800));
     sim.run_until(at_ms(2_000));
     sim
 }
 
 #[test]
-fn disarm_mid_burst_with_the_button_delivered_up() {
-    let disarm = at_ms(330);
-    let sim = disarmed_mid_burst(disarm);
-    sim.assert_ends_cleanly(LEFT, disarm);
+fn disable_mid_burst_with_the_button_delivered_up() {
+    let disable = at_ms(330);
+    let sim = disabled_mid_burst(disable);
+    sim.assert_ends_cleanly(LEFT, disable);
     assert_eq!(final_up_source(&sim), Source::Tagged);
-    assert!(sim.statuses().contains(&(disarm, Status::Disarmed)));
+    assert!(sim.statuses().contains(&(disable, Status::Disabled)));
 }
 
 #[test]
-fn disarm_mid_burst_with_the_button_delivered_down() {
-    let disarm = at_ms(370);
-    let sim = disarmed_mid_burst(disarm);
-    sim.assert_ends_cleanly(LEFT, disarm);
+fn disable_mid_burst_with_the_button_delivered_down() {
+    let disable = at_ms(370);
+    let sim = disabled_mid_burst(disable);
+    sim.assert_ends_cleanly(LEFT, disable);
     assert_eq!(final_up_source(&sim), Source::Physical);
 }
 
@@ -223,7 +223,7 @@ fn hook_death_with_an_up_unechoed_release_after_detection() {
 
 #[test]
 fn hook_death_stops_both_buttons_and_leaves_neither_down() {
-    let mut sim = Sim::armed(settings(10, 250, 0.0));
+    let mut sim = Sim::enabled(settings(10, 250, false));
     sim.press(LEFT, at_ms(0));
     // Right runs 20 ms behind left. After the observation dies at 365 ms,
     // right's down at 370 ms and left's up at 410 ms never echo, and right's

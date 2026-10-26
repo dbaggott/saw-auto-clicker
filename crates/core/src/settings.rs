@@ -2,22 +2,27 @@ use std::fmt;
 use std::ops::RangeInclusive;
 use std::time::Duration;
 
+use crate::gate::Button;
+
 /// Supported clicks per second (Q1).
 pub const CPS_RANGE: RangeInclusive<u32> = 1..=50;
 /// Supported activation delays (Q2).
 pub const ACTIVATION_DELAY_RANGE: RangeInclusive<Duration> =
     Duration::from_millis(50)..=Duration::from_millis(2000);
-/// Supported Jitter, as a fraction of the nominal interval (D5); the settings
-/// window shows it as 0–50%.
-pub const JITTER_RANGE: RangeInclusive<f64> = 0.0..=0.5;
+/// The fastest clicking a person reaches by butterfly clicking, alternating
+/// two fingers on one button. The settings window's butterfly preset sets it,
+/// with Jitter on.
+pub const BUTTERFLY_CPS: u32 = 12;
 
-/// The user's settings (R1), shared by both buttons. Construction rejects
-/// values outside Q1–Q3's ranges, so a `Settings` is always in range.
+/// The user's settings (R1), shared by every button that auto-clicks.
+/// Construction rejects values outside Q1–Q2's ranges, so a `Settings` is
+/// always in range.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
     cps: u32,
     activation_delay: Duration,
-    jitter: f64,
+    jitter: bool,
+    buttons: ClickButtons,
     hotkey: Option<Hotkey>,
 }
 
@@ -25,7 +30,8 @@ impl Settings {
     pub fn new(
         cps: u32,
         activation_delay: Duration,
-        jitter: f64,
+        jitter: bool,
+        buttons: ClickButtons,
         hotkey: Option<Hotkey>,
     ) -> Result<Settings, SettingsError> {
         if !CPS_RANGE.contains(&cps) {
@@ -34,15 +40,18 @@ impl Settings {
         if !ACTIVATION_DELAY_RANGE.contains(&activation_delay) {
             return Err(SettingsError::ActivationDelay(activation_delay));
         }
-        if !JITTER_RANGE.contains(&jitter) {
-            return Err(SettingsError::Jitter(jitter));
-        }
         Ok(Settings {
             cps,
             activation_delay,
             jitter,
+            buttons,
             hotkey,
         })
+    }
+
+    /// These settings with `hotkey` in place of their own.
+    pub fn with_hotkey(self, hotkey: Option<Hotkey>) -> Settings {
+        Settings { hotkey, ..self }
     }
 
     pub fn cps(&self) -> u32 {
@@ -53,8 +62,13 @@ impl Settings {
         self.activation_delay
     }
 
-    pub fn jitter(&self) -> f64 {
+    /// Whether click timing varies as a person's does (D5).
+    pub fn jitter(&self) -> bool {
         self.jitter
+    }
+
+    pub fn buttons(&self) -> ClickButtons {
+        self.buttons
     }
 
     /// The toggle hotkey, or `None` when the user has not chosen one (Q3).
@@ -73,8 +87,27 @@ impl Default for Settings {
         Settings {
             cps: 10,
             activation_delay: Duration::from_millis(250),
-            jitter: 0.0,
+            jitter: false,
+            buttons: ClickButtons::Both,
             hotkey: None,
+        }
+    }
+}
+
+/// Which mouse buttons auto-click when held.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ClickButtons {
+    Left,
+    Both,
+    Right,
+}
+
+impl ClickButtons {
+    pub fn includes(self, button: Button) -> bool {
+        match self {
+            ClickButtons::Both => true,
+            ClickButtons::Left => button == Button::Left,
+            ClickButtons::Right => button == Button::Right,
         }
     }
 }
@@ -83,7 +116,6 @@ impl Default for Settings {
 pub enum SettingsError {
     Cps(u32),
     ActivationDelay(Duration),
-    Jitter(f64),
 }
 
 impl fmt::Display for SettingsError {
@@ -101,13 +133,6 @@ impl fmt::Display for SettingsError {
                 ACTIVATION_DELAY_RANGE.start().as_millis(),
                 ACTIVATION_DELAY_RANGE.end().as_millis(),
                 delay.as_millis()
-            ),
-            SettingsError::Jitter(jitter) => write!(
-                f,
-                "Jitter must be {}–{}%, got {}%",
-                JITTER_RANGE.start() * 100.0,
-                JITTER_RANGE.end() * 100.0,
-                jitter * 100.0
             ),
         }
     }
@@ -209,53 +234,39 @@ mod tests {
         let s = Settings::default();
         assert_eq!(s.cps(), 10);
         assert_eq!(s.activation_delay(), ms(250));
-        assert_eq!(s.jitter(), 0.0);
+        assert!(!s.jitter());
+        assert_eq!(s.buttons(), ClickButtons::Both);
         assert_eq!(s.hotkey(), None);
         assert_eq!(s.interval(), ms(100));
     }
 
     #[test]
     fn range_ends_are_accepted() {
-        let hk = None;
-        for (cps, delay, jitter) in [(1, 50, 0.0), (50, 2000, 0.5)] {
-            let s = Settings::new(cps, ms(delay), jitter, hk).unwrap();
-            assert_eq!(
-                (s.cps(), s.activation_delay(), s.jitter()),
-                (cps, ms(delay), jitter)
-            );
+        for (cps, delay) in [(1, 50), (50, 2000)] {
+            let s = Settings::new(cps, ms(delay), true, ClickButtons::Left, None).unwrap();
+            assert_eq!((s.cps(), s.activation_delay()), (cps, ms(delay)));
         }
     }
 
     #[test]
     fn out_of_range_values_are_rejected() {
-        let hk = None;
-        assert_eq!(
-            Settings::new(0, ms(250), 0.0, hk),
-            Err(SettingsError::Cps(0))
-        );
-        assert_eq!(
-            Settings::new(51, ms(250), 0.0, hk),
-            Err(SettingsError::Cps(51))
-        );
-        assert_eq!(
-            Settings::new(10, ms(49), 0.0, hk),
-            Err(SettingsError::ActivationDelay(ms(49)))
-        );
-        assert_eq!(
-            Settings::new(10, ms(2001), 0.0, hk),
-            Err(SettingsError::ActivationDelay(ms(2001)))
-        );
-        assert_eq!(
-            Settings::new(10, ms(250), -0.01, hk),
-            Err(SettingsError::Jitter(-0.01))
-        );
-        assert_eq!(
-            Settings::new(10, ms(250), 0.51, hk),
-            Err(SettingsError::Jitter(0.51))
-        );
-        assert!(matches!(
-            Settings::new(10, ms(250), f64::NAN, hk),
-            Err(SettingsError::Jitter(_))
-        ));
+        let new = |cps, delay| Settings::new(cps, ms(delay), false, ClickButtons::Both, None);
+        assert_eq!(new(0, 250), Err(SettingsError::Cps(0)));
+        assert_eq!(new(51, 250), Err(SettingsError::Cps(51)));
+        assert_eq!(new(10, 49), Err(SettingsError::ActivationDelay(ms(49))));
+        assert_eq!(new(10, 2001), Err(SettingsError::ActivationDelay(ms(2001))));
+    }
+
+    #[test]
+    fn click_buttons_include_their_buttons() {
+        use Button::{Left, Right};
+        assert!(ClickButtons::Left.includes(Left) && !ClickButtons::Left.includes(Right));
+        assert!(ClickButtons::Right.includes(Right) && !ClickButtons::Right.includes(Left));
+        assert!(ClickButtons::Both.includes(Left) && ClickButtons::Both.includes(Right));
+    }
+
+    #[test]
+    fn the_butterfly_cps_is_in_range() {
+        assert!(CPS_RANGE.contains(&BUTTERFLY_CPS));
     }
 }

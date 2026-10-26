@@ -20,13 +20,14 @@ use crate::apply::apply;
 use crate::config;
 use crate::status::{BurstWatch, TrayState, hotkey_missing};
 use crate::win::autostart::StartAtLogin;
-use crate::win::instance::show_error;
+use crate::win::instance::{listen_for_show_settings, show_error};
 use crate::win::tray::{MenuAction, Tray};
 
-/// What the clicker's threads tell the main thread.
+/// What the clicker's threads, and a second launch, tell the main thread.
 enum Event {
     Status(Status),
     BurstStarted,
+    ShowSettings,
 }
 
 /// Sends to the main thread and wakes its message loop, from any thread
@@ -56,8 +57,9 @@ pub enum Next {
     Quit,
 }
 
-/// Whether settings are written to the settings file. The self-test arms
-/// even when that file says not to, and never writes it.
+/// Whether the app leaves anything behind: the settings file, the Start at
+/// login value, and the signal a second launch sends. The self-test enables
+/// even when the settings file says not to, and touches none of them.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Persist {
     Yes,
@@ -66,7 +68,7 @@ pub enum Persist {
 
 pub struct App {
     pub settings: Settings,
-    pub arm_on_startup: bool,
+    pub enable_on_startup: bool,
     pub active_hotkey: Option<Hotkey>,
     pub hotkey_problem: Option<String>,
     pub config_problem: Option<String>,
@@ -83,8 +85,8 @@ pub struct App {
 }
 
 impl App {
-    /// Starts everything, arming on the first run and otherwise only when
-    /// the settings file says to arm on startup; the state the app was left
+    /// Starts everything, enabling on the first run and otherwise only when
+    /// the settings file says to enable on startup; the state the app was left
     /// in last time doesn't count. The first run writes the file, so the
     /// next start is not a first run. Runs on the main thread, which must
     /// then pump messages: [`App::run`] does.
@@ -101,6 +103,12 @@ impl App {
             events: events_tx,
             thread_id: unsafe { GetCurrentThreadId() },
         };
+        if persist == Persist::Yes {
+            let show_to_main = to_main.clone();
+            // Without it a second launch shows a message instead of this
+            // window, so the app carries on.
+            let _ = listen_for_show_settings(move || show_to_main.send(Event::ShowSettings));
+        }
         let status_to_main = to_main.clone();
         let mut watch = BurstWatch::default();
         let clicker = Clicker::start(
@@ -123,15 +131,20 @@ impl App {
             &mut hotkeys,
         );
         let start_at_login = StartAtLogin::for_this_user();
+        // On failure an older value keeps opening the settings window at
+        // sign-in, which is all it costs.
+        if let (Persist::Yes, Ok(exe)) = (persist, std::env::current_exe()) {
+            let _ = start_at_login.update(&exe);
+        }
         let tray_state = TrayState {
-            armed: false,
+            enabled: false,
             elevated_warning: false,
             hotkey_missing: hotkey_missing(&applied.settings, applied.active_hotkey),
         };
         let tray = match Tray::new(tray_state, start_at_login_checked(&start_at_login)) {
             Ok(tray) => tray,
             Err(e) => {
-                // Still disarmed, so nothing is held up; stop in quit's order.
+                // Still disabled, so nothing is held up; stop in quit's order.
                 drop(hotkeys);
                 let _ = clicker.shutdown();
                 return Err(e);
@@ -139,7 +152,7 @@ impl App {
         };
         let mut app = App {
             settings: applied.settings,
-            arm_on_startup: loaded.arm_on_startup,
+            enable_on_startup: loaded.enable_on_startup,
             active_hotkey: applied.active_hotkey,
             hotkey_problem: applied.hotkey_problem,
             config_problem: loaded.problem,
@@ -156,8 +169,8 @@ impl App {
         if loaded.first_run {
             app.save();
         }
-        if loaded.first_run || loaded.arm_on_startup || persist == Persist::No {
-            app.clicker().controller().set_armed(true);
+        if loaded.first_run || loaded.enable_on_startup || persist == Persist::No {
+            app.clicker().controller().set_enabled(true);
         }
         Ok(app)
     }
@@ -166,15 +179,17 @@ impl App {
         self.clicker.as_ref().expect("present until quit")
     }
 
-    pub fn armed(&self) -> bool {
-        self.tray_state.armed
+    pub fn enabled(&self) -> bool {
+        self.tray_state.enabled
     }
 
     /// The main thread's loop: tray clicks, the clicker's reports, and the
-    /// settings window when asked for, until Quit.
-    pub fn run(mut self) -> Result<(), String> {
+    /// settings window when asked for, until Quit. `first` is what to do
+    /// before anything has arrived.
+    pub fn run(mut self, first: Next) -> Result<(), String> {
+        let mut next = first;
         loop {
-            match self.handle_arrivals() {
+            match next {
                 Next::Wait => {}
                 Next::OpenSettings => {
                     match crate::win::settings_window::show(&mut self, None) {
@@ -183,6 +198,7 @@ impl App {
                         // The tray and the clicker carry on without the window.
                         Err(e) => show_error(&e),
                     }
+                    next = self.handle_arrivals();
                     continue;
                 }
                 Next::Quit => break,
@@ -198,6 +214,7 @@ impl App {
                 let _ = TranslateMessage(&msg);
                 DispatchMessageW(&msg);
             }
+            next = self.handle_arrivals();
         }
         self.quit()
     }
@@ -206,29 +223,30 @@ impl App {
     /// the caller's loop should do next.
     pub fn handle_arrivals(&mut self) -> Next {
         let shown = self.tray_state;
-        let mut armed_reported = None;
+        let mut enabled_reported = None;
+        let mut next = Next::Wait;
         while let Ok(event) = self.events.try_recv() {
             match event {
-                Event::Status(Status::Armed) => armed_reported = Some(true),
-                Event::Status(Status::Disarmed) => armed_reported = Some(false),
+                Event::Status(Status::Enabled) => enabled_reported = Some(true),
+                Event::Status(Status::Disabled) => enabled_reported = Some(false),
                 Event::Status(Status::TargetNotInjectable(_)) => {
                     self.tray_state.elevated_warning = true;
                 }
                 Event::BurstStarted => self.tray_state.elevated_warning = false,
+                Event::ShowSettings => next = Next::OpenSettings,
             }
         }
-        if let Some(armed) = armed_reported {
-            self.tray_state.armed = armed;
+        if let Some(enabled) = enabled_reported {
+            self.tray_state.enabled = enabled;
         }
         if self.tray_state != shown {
             self.tray.show(self.tray_state);
         }
         // Only the menu matters; icon clicks are drained so they don't pile up.
         while TrayIconEvent::receiver().try_recv().is_ok() {}
-        let mut next = Next::Wait;
         while let Ok(event) = MenuEvent::receiver().try_recv() {
             match self.tray.action(&event) {
-                Some(MenuAction::ToggleArmed) => self.clicker().controller().toggle_armed(),
+                Some(MenuAction::ToggleEnabled) => self.clicker().controller().toggle_enabled(),
                 Some(MenuAction::OpenSettings) if next == Next::Wait => next = Next::OpenSettings,
                 Some(MenuAction::StartAtLogin(on)) => self.set_start_at_login(on),
                 Some(MenuAction::Quit) => next = Next::Quit,
@@ -254,8 +272,8 @@ impl App {
     }
 
     /// Puts the settings window's settings into effect and saves them with
-    /// whether to arm on startup (R14, R15). They apply from the next press.
-    pub fn apply_settings(&mut self, requested: Settings, arm_on_startup: bool) {
+    /// whether to enable on startup (R14, R15). They apply from the next press.
+    pub fn apply_settings(&mut self, requested: Settings, enable_on_startup: bool) {
         let hotkeys = self.hotkeys.as_mut().expect("present until quit");
         let applied = apply(&self.settings, self.active_hotkey, requested, hotkeys);
         self.clicker()
@@ -264,7 +282,7 @@ impl App {
         self.settings = applied.settings;
         self.active_hotkey = applied.active_hotkey;
         self.hotkey_problem = applied.hotkey_problem;
-        self.arm_on_startup = arm_on_startup;
+        self.enable_on_startup = enable_on_startup;
         self.tray_state.hotkey_missing = hotkey_missing(&self.settings, self.active_hotkey);
         self.tray.show(self.tray_state);
         self.save();
@@ -279,7 +297,7 @@ impl App {
             (_, Persist::No) => None,
             (None, Persist::Yes) => Some("APPDATA is not set, so settings can't be saved".into()),
             (Some(path), Persist::Yes) => {
-                match config::save(path, &self.settings, self.arm_on_startup) {
+                match config::save(path, &self.settings, self.enable_on_startup) {
                     Ok(()) => {
                         self.config_problem = None;
                         None
@@ -293,12 +311,12 @@ impl App {
         };
     }
 
-    /// Pumps messages until the clicker reports armed, for the self-test.
-    pub fn wait_until_armed(&mut self, deadline: Duration) -> Result<(), String> {
+    /// Pumps messages until the clicker reports enabled, for the self-test.
+    pub fn wait_until_enabled(&mut self, deadline: Duration) -> Result<(), String> {
         let until = Instant::now() + deadline;
-        while !self.armed() {
+        while !self.enabled() {
             if Instant::now() > until {
-                return Err(format!("not armed within {deadline:?}"));
+                return Err(format!("not enabled within {deadline:?}"));
             }
             pump_waiting_messages();
             self.handle_arrivals();

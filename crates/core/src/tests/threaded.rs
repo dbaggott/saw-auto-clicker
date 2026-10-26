@@ -11,7 +11,7 @@ use crate::clock::StdClock;
 use crate::gate::{Button, ButtonEvent, Direction, Source, Verdict};
 use crate::runtime::spawn;
 use crate::scheduler::Status;
-use crate::settings::Settings;
+use crate::settings::{ClickButtons, Settings};
 
 /// Injections go to the observing thread, as an OS echoes them to its hook.
 struct EchoingBackend {
@@ -43,7 +43,14 @@ fn a_hold_clicks_and_shutdown_returns() {
     let (hook, hook_events) = mpsc::channel::<ButtonEvent>();
     let statuses = Arc::new(Mutex::new(Vec::new()));
     let status_log = Arc::clone(&statuses);
-    let settings = Settings::new(50, Duration::from_millis(50), 0.0, None).unwrap();
+    let settings = Settings::new(
+        50,
+        Duration::from_millis(50),
+        false,
+        ClickButtons::Both,
+        None,
+    )
+    .unwrap();
     let (mut gate, handle) = spawn(
         EchoingBackend { hook: hook.clone() },
         Arc::new(StdClock::new()),
@@ -61,7 +68,7 @@ fn a_hold_clicks_and_shutdown_returns() {
         delivered
     });
 
-    handle.controller().set_armed(true);
+    handle.controller().set_enabled(true);
     let physical = |direction| ButtonEvent {
         button: Button::Left,
         direction,
@@ -89,5 +96,5 @@ fn a_hold_clicks_and_shutdown_returns() {
         "{directions:?}"
     );
     assert_eq!(directions.last(), Some(&Direction::Up));
-    assert_eq!(*statuses.lock().unwrap(), [Status::Armed]);
+    assert_eq!(*statuses.lock().unwrap(), [Status::Enabled]);
 }

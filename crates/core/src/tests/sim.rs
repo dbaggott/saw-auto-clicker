@@ -18,7 +18,7 @@ use crate::backend::{Inject, Observe};
 use crate::clock::{Clock, Time};
 use crate::gate::{Button, ButtonEvent, ButtonGate, Direction, Inbox, Source, Verdict};
 use crate::scheduler::{Input, Scheduler, Status, Wake};
-use crate::settings::Settings;
+use crate::settings::{ClickButtons, Settings};
 
 pub fn ms(n: u64) -> Duration {
     Duration::from_millis(n)
@@ -36,8 +36,8 @@ pub fn at_us(n: u64) -> Time {
     Time::from_epoch(us(n))
 }
 
-pub fn settings(cps: u32, delay_ms: u64, jitter: f64) -> Settings {
-    Settings::new(cps, ms(delay_ms), jitter, None).unwrap()
+pub fn settings(cps: u32, delay_ms: u64, jitter: bool) -> Settings {
+    Settings::new(cps, ms(delay_ms), jitter, ClickButtons::Both, None).unwrap()
 }
 
 /// An event applications received.
@@ -151,7 +151,7 @@ pub struct Sim {
 }
 
 impl Sim {
-    /// Starts disarmed, as the real scheduler does, with a 1 ms echo latency.
+    /// Starts disabled, as the real scheduler does, with a 1 ms echo latency.
     pub fn new(settings: Settings) -> Sim {
         Sim::with_seed(settings, 1)
     }
@@ -195,10 +195,10 @@ impl Sim {
         }
     }
 
-    /// Armed at time zero.
-    pub fn armed(settings: Settings) -> Sim {
+    /// Enabled at time zero.
+    pub fn enabled(settings: Settings) -> Sim {
         let mut sim = Sim::new(settings);
-        sim.control_at(Time::ZERO, Input::SetArmed(true));
+        sim.control_at(Time::ZERO, Input::SetEnabled(true));
         sim
     }
 

@@ -6,7 +6,7 @@ use std::time::Duration;
 use super::sim::*;
 use crate::clock::Time;
 use crate::gate::{Button, Direction};
-use crate::jitter::MIN_PHASE;
+use crate::jitter::{HUMAN_JITTER, MIN_PHASE};
 use crate::scheduler::Input;
 
 const LEFT: Button = Button::Left;
@@ -29,9 +29,9 @@ fn downs(sim: &Sim) -> Vec<Time> {
 #[test]
 fn without_jitter_downs_are_exactly_one_interval_apart() {
     for cps in [1, 7, 20, 50] {
-        let s = settings(cps, 250, 0.0);
+        let s = settings(cps, 250, false);
         let interval = s.interval();
-        let mut sim = Sim::armed(s);
+        let mut sim = Sim::enabled(s);
         sim.press(LEFT, at_ms(0));
         sim.release(LEFT, at_ms(30_000));
         sim.run_until(at_ms(31_000));
@@ -48,11 +48,12 @@ fn without_jitter_downs_are_exactly_one_interval_apart() {
 }
 
 /// Holds for `clicks` nominal intervals and checks R7 and D5 on every click.
-fn check_jitter(cps: u32, jitter: f64, seed: u64, clicks: u32) {
-    let s = settings(cps, 250, jitter);
+fn check_jitter(cps: u32, seed: u64, clicks: u32) {
+    let jitter = HUMAN_JITTER;
+    let s = settings(cps, 250, true);
     let t = s.interval();
     let mut sim = Sim::with_seed(s, seed);
-    sim.control_at(Time::ZERO, Input::SetArmed(true));
+    sim.control_at(Time::ZERO, Input::SetEnabled(true));
     sim.press(LEFT, at_ms(0));
     let release = at_ms(250) + t * clicks;
     sim.release(LEFT, release);
@@ -103,16 +104,14 @@ fn check_jitter(cps: u32, jitter: f64, seed: u64, clicks: u32) {
 
 #[test]
 fn jitter_keeps_intervals_up_times_and_the_mean_in_bounds() {
-    for jitter in [0.1, 0.3, 0.5] {
-        for cps in [1, 10, 50] {
-            check_jitter(cps, jitter, 7, 3_000);
-        }
+    for cps in [1, 10, 50] {
+        check_jitter(cps, 7, 3_000);
     }
 }
 
 #[test]
 fn jitter_varies_the_intervals() {
-    let mut sim = Sim::armed(settings(10, 250, 0.3));
+    let mut sim = Sim::enabled(settings(10, 250, true));
     sim.press(LEFT, at_ms(0));
     sim.release(LEFT, at_ms(5_000));
     sim.run_until(at_ms(6_000));
@@ -124,7 +123,7 @@ fn jitter_varies_the_intervals() {
 
 #[test]
 fn an_up_echoing_after_its_downs_deadline_sends_the_down_on_the_echo() {
-    let mut sim = Sim::armed(settings(10, 250, 0.0));
+    let mut sim = Sim::enabled(settings(10, 250, false));
     sim.press(LEFT, at_ms(0));
     // Injection 2 is the up at 410 ms; it echoes at 460 ms, after its down's
     // 450 ms deadline.
@@ -148,7 +147,7 @@ fn an_up_echoing_after_its_downs_deadline_sends_the_down_on_the_echo() {
 
 #[test]
 fn a_down_echoing_after_the_next_ups_deadline_skips_that_whole_cycle() {
-    let mut sim = Sim::armed(settings(10, 250, 0.0));
+    let mut sim = Sim::enabled(settings(10, 250, false));
     sim.press(LEFT, at_ms(0));
     // Injection 1 is the down at 350 ms; it echoes at 420 ms, after the next
     // up's 410 ms deadline, so that up and its down are dropped.
@@ -170,9 +169,9 @@ fn a_down_echoing_after_the_next_ups_deadline_skips_that_whole_cycle() {
 
 /// The observation dies just before the first up, at `delay + 0.6T`.
 fn detection_delay(cps: u32) -> Duration {
-    let s = settings(cps, 250, 0.0);
+    let s = settings(cps, 250, false);
     let first_up = at_ms(250) + s.interval().mul_f64(0.6);
-    let mut sim = Sim::armed(s);
+    let mut sim = Sim::enabled(s);
     sim.press(LEFT, at_ms(0));
     sim.kill_observation_at(first_up - ms(1));
     sim.release(LEFT, at_ms(10_000));
@@ -190,23 +189,23 @@ fn liveness_timeout_is_the_longer_of_250_ms_and_two_intervals() {
 }
 
 #[test]
-fn reinstall_on_every_arm() {
-    let mut sim = Sim::new(settings(10, 250, 0.0));
-    sim.control_at(at_ms(10), Input::SetArmed(true));
-    sim.control_at(at_ms(20), Input::SetArmed(true));
-    sim.control_at(at_ms(30), Input::ToggleArmed);
-    sim.control_at(at_ms(40), Input::ToggleArmed);
+fn reinstall_on_every_enable() {
+    let mut sim = Sim::new(settings(10, 250, false));
+    sim.control_at(at_ms(10), Input::SetEnabled(true));
+    sim.control_at(at_ms(20), Input::SetEnabled(true));
+    sim.control_at(at_ms(30), Input::ToggleEnabled);
+    sim.control_at(at_ms(40), Input::ToggleEnabled);
     sim.run_until(at_ms(1_000));
     assert_eq!(sim.reinstalls(), [at_ms(10), at_ms(40)]);
 }
 
 #[test]
-fn reinstall_every_60_s_while_armed_and_idle() {
-    let mut sim = Sim::armed(settings(10, 250, 0.0));
+fn reinstall_every_60_s_while_enabled_and_idle() {
+    let mut sim = Sim::enabled(settings(10, 250, false));
     // Held across the 60 s mark, which defers that reinstall to the release.
     sim.press(LEFT, at_ms(59_000));
     sim.release(LEFT, at_ms(61_000));
-    sim.control_at(at_ms(150_000), Input::SetArmed(false));
+    sim.control_at(at_ms(150_000), Input::SetEnabled(false));
     sim.run_until(at_ms(300_000));
     assert_eq!(sim.reinstalls(), [at_ms(0), at_ms(61_000), at_ms(121_000)]);
 }
@@ -214,7 +213,7 @@ fn reinstall_every_60_s_while_armed_and_idle() {
 #[test]
 fn a_late_down_is_never_followed_by_a_down_hold_under_the_floor() {
     // At 50 CPS click k's up is at 250 + 20k − 8 ms and its down 8 ms later.
-    let mut sim = Sim::armed(settings(50, 250, 0.0));
+    let mut sim = Sim::enabled(settings(50, 250, false));
     sim.press(LEFT, at_ms(0));
     // Injection 2 is the up at 282 ms; it echoes at 301 ms, so its down goes
     // out then, 1 ms before the next up's 302 ms deadline. That cycle is
@@ -238,7 +237,7 @@ fn a_late_down_is_never_followed_by_a_down_hold_under_the_floor() {
 
 #[test]
 fn a_held_button_does_not_stop_the_idle_reinstall() {
-    let mut sim = Sim::armed(settings(10, 250, 0.0));
+    let mut sim = Sim::enabled(settings(10, 250, false));
     // Refused at the delay, so held with no burst, and the release is never
     // seen.
     sim.set_injectable_at(at_ms(0), false);
@@ -248,10 +247,10 @@ fn a_held_button_does_not_stop_the_idle_reinstall() {
 }
 
 #[test]
-fn arming_during_shutdown_is_ignored() {
-    let mut sim = Sim::new(settings(10, 250, 0.0));
+fn enabling_during_shutdown_is_ignored() {
+    let mut sim = Sim::new(settings(10, 250, false));
     sim.control_at(at_ms(0), Input::Shutdown);
-    sim.control_at(at_ms(0), Input::ToggleArmed);
+    sim.control_at(at_ms(0), Input::ToggleEnabled);
     sim.run_until(at_ms(1_000));
     assert!(sim.reinstalls().is_empty());
     assert!(sim.statuses().is_empty());
