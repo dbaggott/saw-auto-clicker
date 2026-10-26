@@ -6,7 +6,7 @@ Each release's notes are its section here. CI fails when the workspace version i
 
 - Starting the app opens its settings window, which explains that the app keeps running in the system tray. Starting it again while it runs opens that window instead of a message. Start at login still starts it quietly in the tray.
 - Settings are saved as you change them; there is no Apply button.
-- New setting: which buttons auto-click, left only, both, or right only.
+- New setting, Clicks: which mouse buttons auto-click, left only, both, or right only.
 - Jitter is now on or off. On adds natural variation to the click rate, roughly as much as a person's clicking has. A saved Jitter above 0% comes back as on.
 - New butterfly button: sets the clicks per second to what a person can reach by butterfly clicking, with Jitter on.
 - Clicking an info icon no longer hides its explanation.

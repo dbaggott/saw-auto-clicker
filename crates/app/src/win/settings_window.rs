@@ -41,7 +41,7 @@ const CPS_HELP: &str = "The target clicks per second when auto-clicking.";
 const DELAY_HELP: &str =
     "The amount of time you must hold down a click before auto-clicking starts.";
 const JITTER_HELP: &str = "Adds natural variation to the click rate.";
-const BUTTONS_HELP: &str = "Which mouse buttons auto-click when held down. A \
+const CLICKS_HELP: &str = "Which mouse buttons auto-click when held down. A \
 button that is left out always clicks normally.";
 const HOTKEY_HELP: &str = "An optional keyboard shortcut that enables and disables auto-clicking.";
 const ENABLE_ON_STARTUP_HELP: &str = "By default, the app starts disabled to prevent \
@@ -276,7 +276,7 @@ impl Window<'_> {
             setting(ui, "Jitter", JITTER_HELP);
             toggle(ui, &mut d.jitter, "Jitter");
             ui.end_row();
-            setting(ui, "Buttons", BUTTONS_HELP);
+            setting(ui, "Clicks", CLICKS_HELP);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
                 for (choice, name) in [
