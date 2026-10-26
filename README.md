@@ -14,7 +14,9 @@ It installs for your user only. The installer isn't signed so you may get warnin
 
 ## How to use it
 
-When it starts, saw-auto-clicker puts an icon in the notification area (the system tray, near the clock).  Click on that icon to control and configure it.
+When you start saw-auto-clicker, its settings window opens. Closing the window leaves it running in the system tray (the notification area, near the clock), as a saw-blade icon. Click that icon to enable or disable auto-clicking, open the settings again, or quit. Windows may tuck a new icon behind the ^ arrow next to the clock; you can drag it out onto the taskbar to keep it in view. Starting saw-auto-clicker again while it's running opens its settings window.
+
+Changes in the settings window are saved as you make them. The butterfly button sets the clicks per second to what a person can reach by butterfly clicking and turns on Jitter, which adds natural variation to the click rate.
 
 The settings should all be self-explanatory. If they are not, open an issue requesting clarification.
 

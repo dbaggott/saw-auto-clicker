@@ -19,7 +19,7 @@ use crate::target::TargetCheck;
 use crate::throttling;
 
 /// The core running on real Windows input: the hook thread observing, the
-/// scheduler injecting on a high-resolution timer. Starts disarmed.
+/// scheduler injecting on a high-resolution timer. Starts disabled.
 pub struct Clicker {
     scheduler: SchedulerHandle,
     hook: HookThread,
@@ -49,7 +49,7 @@ impl Clicker {
             on_status,
         )?;
         if let Err(e) = hook.observe(gate, Box::new(on_observed)) {
-            // Disarmed with nothing observed, so the scheduler has no burst
+            // Disabled with nothing observed, so the scheduler has no burst
             // to close and exits at once.
             let _ = scheduler.shutdown();
             return Err(e);

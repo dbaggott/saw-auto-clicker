@@ -14,6 +14,10 @@ use windows::core::HSTRING;
 const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 const VALUE_NAME: &str = "saw-auto-clicker";
 
+/// The argument the value passes, so a start at sign-in stays in the tray
+/// rather than opening the settings window.
+pub const AT_LOGIN: &str = "--at-login";
+
 /// One value under a key of `HKEY_CURRENT_USER`.
 pub struct StartAtLogin {
     subkey: HSTRING,
@@ -39,9 +43,25 @@ impl StartAtLogin {
             .is_some_and(|command| command.eq_ignore_ascii_case(&command_for(exe))))
     }
 
+    /// Rewrites a value that starts `exe` the way versions before 0.5.0 did,
+    /// without [`AT_LOGIN`], so sign-in stops opening the settings window.
+    pub fn update(&self, exe: &Path) -> io::Result<()> {
+        if self
+            .command()?
+            .is_some_and(|command| command.eq_ignore_ascii_case(&quoted(exe)))
+        {
+            self.enable(exe)?;
+        }
+        Ok(())
+    }
+
     /// Points the value at `exe`.
     pub fn enable(&self, exe: &Path) -> io::Result<()> {
-        let data: Vec<u16> = command_for(exe).encode_utf16().chain([0]).collect();
+        self.set_command(&command_for(exe))
+    }
+
+    fn set_command(&self, command: &str) -> io::Result<()> {
+        let data: Vec<u16> = command.encode_utf16().chain([0]).collect();
         let result = unsafe {
             RegSetKeyValueW(
                 HKEY_CURRENT_USER,
@@ -102,8 +122,12 @@ impl StartAtLogin {
     }
 }
 
-/// Quoted so a path with spaces stays one argument.
 fn command_for(exe: &Path) -> String {
+    format!("{} {AT_LOGIN}", quoted(exe))
+}
+
+/// Quoted so a path with spaces stays one argument.
+fn quoted(exe: &Path) -> String {
     format!("\"{}\"", exe.display())
 }
 
@@ -158,12 +182,29 @@ mod tests {
         assert!(entry.starts(&exe).unwrap());
         assert_eq!(
             entry.command().unwrap().as_deref(),
-            Some(r#""C:\Program Files\saw auto clicker\saw-app.exe""#)
+            Some(r#""C:\Program Files\saw auto clicker\saw-app.exe" --at-login"#)
         );
 
         entry.disable().unwrap();
         assert!(!entry.starts(&exe).unwrap());
         assert_eq!(entry.command().unwrap(), None);
+    }
+
+    #[test]
+    fn update_adds_the_argument_to_an_older_value_for_this_copy_only() {
+        let key = TestKey::new_named("update");
+        let entry = StartAtLogin::at(&key.0, VALUE_NAME);
+        let exe = Path::new(r"C:\saw\saw-app.exe");
+        entry.update(exe).unwrap();
+        assert_eq!(entry.command().unwrap(), None);
+
+        entry.set_command(r#""D:\other\saw-app.exe""#).unwrap();
+        entry.update(exe).unwrap();
+        assert!(!entry.starts(exe).unwrap());
+
+        entry.set_command(r#""C:\saw\saw-app.exe""#).unwrap();
+        entry.update(exe).unwrap();
+        assert!(entry.starts(exe).unwrap());
     }
 
     #[test]

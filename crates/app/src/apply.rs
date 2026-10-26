@@ -33,20 +33,11 @@ pub fn apply(
             settings: requested,
             hotkey_problem: None,
         },
-        Err(e) => {
-            let kept = Settings::new(
-                requested.cps(),
-                requested.activation_delay(),
-                requested.jitter(),
-                current.hotkey(),
-            )
-            .expect("only the hotkey changed, and it has no range");
-            Applied {
-                settings: kept,
-                active_hotkey,
-                hotkey_problem: Some(refusal(requested.hotkey(), &e, active_hotkey)),
-            }
-        }
+        Err(e) => Applied {
+            hotkey_problem: Some(refusal(requested.hotkey(), &e, active_hotkey)),
+            settings: requested.with_hotkey(current.hotkey()),
+            active_hotkey,
+        },
     }
 }
 
@@ -71,7 +62,7 @@ fn refusal(requested: Option<Hotkey>, error: &HotkeyError, active: Option<Hotkey
 mod tests {
     use std::time::Duration;
 
-    use saw_core::{Key, Modifiers};
+    use saw_core::{ClickButtons, Key, Modifiers};
 
     use super::*;
 
@@ -104,7 +95,14 @@ mod tests {
     }
 
     fn settings(cps: u32, hotkey: Hotkey) -> Settings {
-        Settings::new(cps, Duration::from_millis(250), 0.0, Some(hotkey)).unwrap()
+        Settings::new(
+            cps,
+            Duration::from_millis(250),
+            false,
+            ClickButtons::Both,
+            Some(hotkey),
+        )
+        .unwrap()
     }
 
     #[test]

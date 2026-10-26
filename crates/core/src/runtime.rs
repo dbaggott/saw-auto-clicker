@@ -11,7 +11,7 @@ use crate::gate::{ButtonGate, Inbox};
 use crate::scheduler::{Input, Scheduler, Status};
 use crate::settings::Settings;
 
-/// Starts the scheduler thread, disarmed, and returns the button gate for the
+/// Starts the scheduler thread, disabled, and returns the button gate for the
 /// backend's observing thread to own, with the handle that controls the
 /// scheduler and shuts it down.
 ///
@@ -41,7 +41,7 @@ where
     ))
 }
 
-/// Arms, disarms and reconfigures the scheduler from any thread. None of its
+/// Enables, disables and reconfigures the scheduler from any thread. None of its
 /// calls block.
 #[derive(Clone)]
 pub struct Controller {
@@ -49,15 +49,15 @@ pub struct Controller {
 }
 
 impl Controller {
-    /// Arming also replaces the observation (D8). Disarming stops injections
+    /// Enabling also replaces the observation (D8). Disabling stops injections
     /// at once; a running burst ends at its physical release (R2).
-    pub fn set_armed(&self, armed: bool) {
-        self.inbox.send(Input::SetArmed(armed));
+    pub fn set_enabled(&self, enabled: bool) {
+        self.inbox.send(Input::SetEnabled(enabled));
     }
 
     /// What the backend calls on each press of the toggle hotkey.
-    pub fn toggle_armed(&self) {
-        self.inbox.send(Input::ToggleArmed);
+    pub fn toggle_enabled(&self) {
+        self.inbox.send(Input::ToggleEnabled);
     }
 
     /// Takes effect from the next press. A running burst keeps its interval

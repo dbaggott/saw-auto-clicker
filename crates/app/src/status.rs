@@ -8,7 +8,7 @@ const HOTKEY_MISSING_MESSAGE: &str = "No hotkey is active; see Settings.";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TrayState {
-    pub armed: bool,
+    pub enabled: bool,
     /// Set when the core refuses or ends a burst over a window it can't
     /// click into, and cleared when the next burst starts normally.
     pub elevated_warning: bool,
@@ -25,7 +25,7 @@ pub fn hotkey_missing(settings: &Settings, active: Option<Hotkey>) -> bool {
 
 impl TrayState {
     pub fn tooltip(&self) -> String {
-        let state = if self.armed { "armed" } else { "disarmed" };
+        let state = if self.enabled { "enabled" } else { "disabled" };
         let mut text = format!("saw-auto-clicker: {state}");
         for (shown, message) in [
             (self.elevated_warning, ELEVATED_MESSAGE),
@@ -39,9 +39,9 @@ impl TrayState {
         text
     }
 
-    /// The label of the menu item that flips the armed state.
+    /// The label of the menu item that flips the enabled state.
     pub fn toggle_label(&self) -> &'static str {
-        if self.armed { "Disarm" } else { "Arm" }
+        if self.enabled { "Disable" } else { "Enable" }
     }
 }
 
@@ -92,18 +92,18 @@ mod tests {
     #[test]
     fn the_tooltip_names_the_state_and_r16s_message_while_it_applies() {
         let mut state = TrayState::default();
-        assert_eq!(state.tooltip(), "saw-auto-clicker: disarmed");
-        state.armed = true;
-        assert_eq!(state.tooltip(), "saw-auto-clicker: armed");
+        assert_eq!(state.tooltip(), "saw-auto-clicker: disabled");
+        state.enabled = true;
+        assert_eq!(state.tooltip(), "saw-auto-clicker: enabled");
         state.elevated_warning = true;
         assert_eq!(
             state.tooltip(),
-            format!("saw-auto-clicker: armed\n{ELEVATED_MESSAGE}")
+            format!("saw-auto-clicker: enabled\n{ELEVATED_MESSAGE}")
         );
         state.hotkey_missing = true;
         assert_eq!(
             state.tooltip(),
-            format!("saw-auto-clicker: armed\n{ELEVATED_MESSAGE}\n{HOTKEY_MISSING_MESSAGE}")
+            format!("saw-auto-clicker: enabled\n{ELEVATED_MESSAGE}\n{HOTKEY_MISSING_MESSAGE}")
         );
     }
 
@@ -117,13 +117,7 @@ mod tests {
             key: Key::F8,
         };
         let none = Settings::default();
-        let chosen = Settings::new(
-            none.cps(),
-            none.activation_delay(),
-            none.jitter(),
-            Some(hotkey),
-        )
-        .unwrap();
+        let chosen = none.clone().with_hotkey(Some(hotkey));
         assert!(!hotkey_missing(&none, None));
         assert!(hotkey_missing(&chosen, None));
         assert!(!hotkey_missing(&chosen, Some(hotkey)));
@@ -133,7 +127,7 @@ mod tests {
     fn the_tooltip_fits_the_tray_limit() {
         // A notification-area tooltip holds 127 characters plus the NUL.
         let state = TrayState {
-            armed: false,
+            enabled: false,
             elevated_warning: true,
             hotkey_missing: true,
         };

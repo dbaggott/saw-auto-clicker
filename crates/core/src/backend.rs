@@ -8,7 +8,7 @@
 //!   scheduler calls.
 //! - **Inject.** [`Inject`], called by the scheduler.
 //! - **Hotkey.** [`RegisterHotkey`], called by the app. The backend delivers
-//!   each press by calling [`Controller::toggle_armed`](crate::Controller::toggle_armed).
+//!   each press by calling [`Controller::toggle_enabled`](crate::Controller::toggle_enabled).
 //!
 //! The core makes no OS calls itself: it reaches the OS only through these
 //! traits and a [`Clock`](crate::Clock).

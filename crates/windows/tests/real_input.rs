@@ -10,8 +10,8 @@ use std::thread;
 use std::time::Duration;
 
 use saw_core::{
-    Button, ButtonEvent, Direction, Hotkey, HotkeyError, Inject, Key, Modifiers, Observe,
-    RegisterHotkey, Settings, Source, StdClock, Verdict,
+    Button, ButtonEvent, ClickButtons, Direction, Hotkey, HotkeyError, Inject, Key, Modifiers,
+    Observe, RegisterHotkey, Settings, Source, StdClock, Verdict,
 };
 use saw_windows::{Clicker, HotkeyThread, ThrottlingOptOuts};
 use windows::Win32::Foundation::{LPARAM, WPARAM};
@@ -102,7 +102,14 @@ fn a_held_button_auto_clicks_through_the_real_hook() {
     let _target = TargetWindow::under_cursor();
     let observed = Arc::new(Mutex::new(Vec::<(ButtonEvent, Verdict)>::new()));
     let log = Arc::clone(&observed);
-    let settings = Settings::new(20, Duration::from_millis(100), 0.0, None).unwrap();
+    let settings = Settings::new(
+        20,
+        Duration::from_millis(100),
+        false,
+        ClickButtons::Both,
+        None,
+    )
+    .unwrap();
     let clicker = Clicker::start(
         settings,
         ThrottlingOptOuts::default(),
@@ -110,8 +117,8 @@ fn a_held_button_auto_clicks_through_the_real_hook() {
         move |event, verdict| log.lock().unwrap().push((event, verdict)),
     )
     .unwrap();
-    clicker.controller().set_armed(true);
-    // Arming reinstalls the hook; let that land before pressing.
+    clicker.controller().set_enabled(true);
+    // Enabling reinstalls the hook; let that land before pressing.
     thread::sleep(Duration::from_millis(200));
 
     send_untagged(MOUSEEVENTF_LEFTDOWN);

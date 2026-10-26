@@ -68,22 +68,26 @@ Source: "{#AppExeArm64}"; DestDir: "{app}"; DestName: "{#AppExeName}"; Check: Is
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"
 
 [Registry]
-; The same string the app writes, quoted, so its tray menu shows Start at login
-; checked. Uninstall removes it only when it still names this install (below).
-Root: HKCU; Subkey: "{#RunKey}"; ValueType: string; ValueName: "{#RunValue}"; ValueData: """{app}\{#AppExeName}"""; Tasks: startatlogin
+; The same string the app writes (crates/app/src/win/autostart.rs), so its tray
+; menu shows Start at login checked and a start at sign-in stays in the tray.
+; Uninstall removes it only when it still names this install (below).
+Root: HKCU; Subkey: "{#RunKey}"; ValueType: string; ValueName: "{#RunValue}"; ValueData: """{app}\{#AppExeName}"" --at-login"; Tasks: startatlogin
 
 [Run]
 Filename: "{app}\{#AppExeName}"; Description: "Launch {#AppName}"; Flags: postinstall nowait skipifsilent
 
 [Code]
 // Leaves a value pointing at another copy, such as a portable exe, alone.
-// CompareText ignores ASCII case, as the app's own comparison does.
+// CompareText ignores ASCII case, as the app's own comparison does. Versions
+// before 0.5.0 wrote the path without --at-login.
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
-  Command: String;
+  Command, Quoted: String;
 begin
+  Quoted := '"' + ExpandConstant('{app}\{#AppExeName}') + '"';
   if (CurUninstallStep = usUninstall)
     and RegQueryStringValue(HKCU, '{#RunKey}', '{#RunValue}', Command)
-    and (CompareText(Command, '"' + ExpandConstant('{app}\{#AppExeName}') + '"') = 0) then
+    and ((CompareText(Command, Quoted + ' --at-login') = 0)
+      or (CompareText(Command, Quoted) = 0)) then
     RegDeleteValue(HKCU, '{#RunKey}', '{#RunValue}');
 end;

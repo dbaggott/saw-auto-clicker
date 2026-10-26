@@ -3,7 +3,7 @@
 //! microseconds from the start of the run.
 //!
 //! ```text
-//! # saw-measure cps=50 jitter=0 delay_ms=250 execution_speed_opt_out=on timer_resolution_opt_out=on
+//! # saw-measure cps=50 jitter=off delay_ms=250 execution_speed_opt_out=on timer_resolution_opt_out=on
 //! 1250331 left press
 //! 1500412 left click
 //! ```
@@ -19,7 +19,7 @@ const HEADER_PREFIX: &str = "# saw-measure";
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RunInfo {
     pub cps: u32,
-    pub jitter_percent: u32,
+    pub jitter: bool,
     pub delay_ms: u64,
     pub execution_speed_opt_out: bool,
     pub timer_resolution_opt_out: bool,
@@ -72,7 +72,7 @@ impl fmt::Display for RunInfo {
             f,
             "{HEADER_PREFIX} cps={} jitter={} delay_ms={} execution_speed_opt_out={} timer_resolution_opt_out={}",
             self.cps,
-            self.jitter_percent,
+            on_off(self.jitter),
             self.delay_ms,
             on_off(self.execution_speed_opt_out),
             on_off(self.timer_resolution_opt_out),
@@ -89,7 +89,7 @@ impl FromStr for RunInfo {
             .ok_or_else(|| format!("expected a header starting {HEADER_PREFIX:?}"))?;
         let mut info = RunInfo {
             cps: 0,
-            jitter_percent: 0,
+            jitter: false,
             delay_ms: 0,
             execution_speed_opt_out: false,
             timer_resolution_opt_out: false,
@@ -112,7 +112,7 @@ impl FromStr for RunInfo {
                         return Err(bad());
                     }
                 }
-                "jitter" => info.jitter_percent = value.parse().map_err(|_| bad())?,
+                "jitter" => info.jitter = flag()?,
                 "delay_ms" => info.delay_ms = value.parse().map_err(|_| bad())?,
                 "execution_speed_opt_out" => info.execution_speed_opt_out = flag()?,
                 "timer_resolution_opt_out" => info.timer_resolution_opt_out = flag()?,
@@ -220,7 +220,7 @@ mod tests {
     fn info() -> RunInfo {
         RunInfo {
             cps: 50,
-            jitter_percent: 30,
+            jitter: true,
             delay_ms: 250,
             execution_speed_opt_out: true,
             timer_resolution_opt_out: false,
@@ -263,7 +263,7 @@ mod tests {
     fn the_header_names_every_setting() {
         assert_eq!(
             info().to_string(),
-            "# saw-measure cps=50 jitter=30 delay_ms=250 execution_speed_opt_out=on timer_resolution_opt_out=off"
+            "# saw-measure cps=50 jitter=on delay_ms=250 execution_speed_opt_out=on timer_resolution_opt_out=off"
         );
     }
 
@@ -281,7 +281,7 @@ mod tests {
 
     #[test]
     fn a_header_missing_a_field_is_rejected() {
-        let err = "# saw-measure cps=10 jitter=0 delay_ms=250 execution_speed_opt_out=on"
+        let err = "# saw-measure cps=10 jitter=off delay_ms=250 execution_speed_opt_out=on"
             .parse::<RunInfo>()
             .unwrap_err();
         assert!(err.contains("timer_resolution_opt_out"), "{err}");
@@ -301,7 +301,7 @@ mod tests {
 
     #[test]
     fn a_zero_target_rate_is_rejected() {
-        let header = "# saw-measure cps=0 jitter=0 delay_ms=250 execution_speed_opt_out=on timer_resolution_opt_out=on";
+        let header = "# saw-measure cps=0 jitter=off delay_ms=250 execution_speed_opt_out=on timer_resolution_opt_out=on";
         assert!(header.parse::<RunInfo>().is_err());
     }
 

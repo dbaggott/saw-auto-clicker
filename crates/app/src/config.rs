@@ -2,7 +2,7 @@
 //! default, loaded at startup and written on the first run and whenever the
 //! settings window applies a change.
 
-use saw_core::{CPS_RANGE, Settings};
+use saw_core::{CPS_RANGE, ClickButtons, Settings};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
@@ -28,8 +28,15 @@ pub fn default_path() -> Option<PathBuf> {
 struct FileIn {
     cps: Option<toml::Value>,
     activation_delay_ms: Option<toml::Value>,
+    jitter: Option<toml::Value>,
+    /// What versions before 0.5.0 wrote for Jitter, read when `jitter` is
+    /// absent: any percentage above zero means on.
     jitter_percent: Option<toml::Value>,
+    buttons: Option<toml::Value>,
     hotkey: Option<toml::Value>,
+    enable_on_startup: Option<toml::Value>,
+    /// What versions before 0.5.0 wrote for `enable_on_startup`, read when it
+    /// is absent.
     arm_on_startup: Option<toml::Value>,
 }
 
@@ -38,18 +45,25 @@ struct FileIn {
 struct FileOut {
     cps: u32,
     activation_delay_ms: u32,
-    jitter_percent: u32,
+    jitter: bool,
+    buttons: &'static str,
     /// Empty for no hotkey.
     hotkey: String,
-    arm_on_startup: bool,
+    enable_on_startup: bool,
 }
+
+const BUTTON_NAMES: [(ClickButtons, &str); 3] = [
+    (ClickButtons::Left, "left"),
+    (ClickButtons::Both, "both"),
+    (ClickButtons::Right, "right"),
+];
 
 /// What [`load`] read.
 #[derive(Debug, PartialEq)]
 pub struct Loaded {
     pub settings: Settings,
-    /// Whether the app arms when it starts. Off when the file doesn't say.
-    pub arm_on_startup: bool,
+    /// Whether the app enables when it starts. Off when the file doesn't say.
+    pub enable_on_startup: bool,
     /// Whether there was no file, as on the first run after the first
     /// install. An upgrade or reinstall keeps the file.
     pub first_run: bool,
@@ -63,16 +77,16 @@ impl Loaded {
     pub fn defaults(problem: Option<String>) -> Loaded {
         Loaded {
             settings: Settings::default(),
-            arm_on_startup: false,
+            enable_on_startup: false,
             first_run: false,
             problem,
         }
     }
 }
 
-/// Reads the settings and whether to arm on startup, using the default for
+/// Reads the settings and whether to enable on startup, using the default for
 /// each value that is missing or invalid (Q1–Q3's for the settings, off for
-/// arming), and for all of them when the file is missing or isn't TOML.
+/// enabling), and for all of them when the file is missing or isn't TOML.
 pub fn load(path: &Path) -> Loaded {
     let text = match fs::read_to_string(path) {
         Ok(text) => text,
@@ -112,11 +126,31 @@ fn from_file(file: FileIn) -> Loaded {
         form::delay_ms_range(),
         defaults.delay_ms,
     );
-    let jitter_percent = whole(
-        "jitter_percent",
-        file.jitter_percent,
-        form::jitter_percent_range(),
-        defaults.jitter_percent,
+    let jitter = match (file.jitter, file.jitter_percent) {
+        (None, Some(percent)) => pick(
+            &mut problems,
+            "jitter_percent",
+            Some(whole_in(&percent, 0..=100).map(|p| p > 0)),
+            defaults.jitter,
+        ),
+        (jitter, _) => pick(
+            &mut problems,
+            "jitter",
+            jitter.map(|v| boolean(&v)),
+            defaults.jitter,
+        ),
+    };
+    let buttons = pick(
+        &mut problems,
+        "buttons",
+        file.buttons.map(|v| {
+            BUTTON_NAMES
+                .iter()
+                .find(|(_, name)| v.as_str() == Some(name))
+                .map(|&(buttons, _)| buttons)
+                .ok_or_else(|| format!("must be \"left\", \"both\" or \"right\", got {v}"))
+        }),
+        defaults.buttons,
     );
     let hotkey = pick(
         &mut problems,
@@ -134,19 +168,16 @@ fn from_file(file: FileIn) -> Loaded {
         }),
         defaults.hotkey,
     );
-    let arm_on_startup = pick(
-        &mut problems,
-        "arm_on_startup",
-        file.arm_on_startup.map(|v| {
-            v.as_bool()
-                .ok_or_else(|| format!("must be true or false, got {v}"))
-        }),
-        false,
-    );
+    let (name, value) = match (file.enable_on_startup, file.arm_on_startup) {
+        (None, Some(old)) => ("arm_on_startup", Some(old)),
+        (value, _) => ("enable_on_startup", value),
+    };
+    let enable_on_startup = pick(&mut problems, name, value.map(|v| boolean(&v)), false);
     let draft = Draft {
         cps,
         delay_ms,
-        jitter_percent,
+        jitter,
+        buttons,
         hotkey,
     };
     let settings = draft
@@ -160,7 +191,7 @@ fn from_file(file: FileIn) -> Loaded {
     });
     Loaded {
         settings,
-        arm_on_startup,
+        enable_on_startup,
         first_run: false,
         problem,
     }
@@ -175,6 +206,12 @@ fn whole_in(value: &toml::Value, range: std::ops::RangeInclusive<u32>) -> Result
         .ok()
         .filter(|n| range.contains(n))
         .ok_or_else(|| format!("must be {}–{}, got {n}", range.start(), range.end()))
+}
+
+fn boolean(value: &toml::Value) -> Result<bool, String> {
+    value
+        .as_bool()
+        .ok_or_else(|| format!("must be true or false, got {value}"))
 }
 
 /// A value read from the file if it is present and valid, else `default`,
@@ -195,19 +232,24 @@ fn pick<T>(
     }
 }
 
-/// Writes the settings and whether to arm on startup, creating the directory
+/// Writes the settings and whether to enable on startup, creating the directory
 /// if needed. The file is replaced in one step, so a failed write leaves the
 /// previous one intact.
-pub fn save(path: &Path, settings: &Settings, arm_on_startup: bool) -> io::Result<()> {
+pub fn save(path: &Path, settings: &Settings, enable_on_startup: bool) -> io::Result<()> {
     let draft = Draft::from(settings);
     let file = FileOut {
         cps: draft.cps,
         activation_delay_ms: draft.delay_ms,
-        jitter_percent: draft.jitter_percent,
+        jitter: draft.jitter,
+        buttons: BUTTON_NAMES
+            .iter()
+            .find(|&&(buttons, _)| buttons == draft.buttons)
+            .map(|&(_, name)| name)
+            .expect("every choice has a name"),
         hotkey: draft
             .hotkey
             .map_or_else(String::new, |h| HotkeyText(h).to_string()),
-        arm_on_startup,
+        enable_on_startup,
     };
     let text = toml::to_string(&file).map_err(io::Error::other)?;
     if let Some(dir) = path.parent() {
@@ -222,7 +264,7 @@ pub fn save(path: &Path, settings: &Settings, arm_on_startup: bool) -> io::Resul
 mod tests {
     use std::time::Duration;
 
-    use saw_core::{Hotkey, Key, Modifiers};
+    use saw_core::{ClickButtons, Hotkey, Key, Modifiers};
 
     use super::*;
 
@@ -263,7 +305,14 @@ mod tests {
             },
             key: Key::K,
         };
-        Settings::new(37, Duration::from_millis(600), 0.3, Some(hotkey)).unwrap()
+        Settings::new(
+            37,
+            Duration::from_millis(600),
+            true,
+            ClickButtons::Right,
+            Some(hotkey),
+        )
+        .unwrap()
     }
 
     #[test]
@@ -273,7 +322,7 @@ mod tests {
             load(&dir.file()),
             Loaded {
                 settings: Settings::default(),
-                arm_on_startup: false,
+                enable_on_startup: false,
                 first_run: true,
                 problem: None
             }
@@ -288,7 +337,7 @@ mod tests {
             load(&dir.file()),
             Loaded {
                 settings: custom(),
-                arm_on_startup: true,
+                enable_on_startup: true,
                 first_run: false,
                 problem: None
             }
@@ -298,7 +347,7 @@ mod tests {
             load(&dir.file()),
             Loaded {
                 settings: Settings::default(),
-                arm_on_startup: false,
+                enable_on_startup: false,
                 first_run: false,
                 problem: None
             }
@@ -318,37 +367,89 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_arm_on_startup_value_means_off() {
-        let dir = TempDir::new("arm-missing");
+    fn a_missing_enable_on_startup_value_means_off() {
+        let dir = TempDir::new("enable-missing");
         write(&dir.file(), "cps = 20\n");
         let loaded = load(&dir.file());
-        assert!(!loaded.arm_on_startup);
+        assert!(!loaded.enable_on_startup);
         assert!(!loaded.first_run);
         assert_eq!(loaded.problem, None);
     }
 
     #[test]
-    fn the_armed_state_an_older_version_saved_is_ignored() {
+    fn the_on_off_state_an_older_version_saved_is_ignored() {
         let dir = TempDir::new("old-armed");
         write(&dir.file(), "hotkey = \"Ctrl+Alt+F8\"\narmed = true\n");
         let loaded = load(&dir.file());
-        assert!(!loaded.arm_on_startup);
+        assert!(!loaded.enable_on_startup);
         assert!(loaded.settings.hotkey().is_some());
         assert_eq!(loaded.problem, None);
     }
 
     #[test]
-    fn an_arm_on_startup_value_that_is_not_a_boolean_means_off_with_a_reason() {
-        let dir = TempDir::new("arm-wrong-type");
-        write(&dir.file(), "cps = 20\narm_on_startup = \"yes\"\n");
+    fn an_enable_on_startup_value_that_is_not_a_boolean_means_off_with_a_reason() {
+        let dir = TempDir::new("enable-wrong-type");
+        write(&dir.file(), "cps = 20\nenable_on_startup = \"yes\"\n");
         let loaded = load(&dir.file());
-        assert!(!loaded.arm_on_startup);
+        assert!(!loaded.enable_on_startup);
         assert_eq!(loaded.settings.cps(), 20);
         let problem = loaded.problem.unwrap();
         assert!(
-            problem.contains("arm_on_startup must be true or false"),
+            problem.contains("enable_on_startup must be true or false"),
             "{problem:?}"
         );
+    }
+
+    #[test]
+    fn values_older_versions_wrote_are_read_when_the_new_ones_are_absent() {
+        let dir = TempDir::new("legacy");
+        write(&dir.file(), "jitter_percent = 30\narm_on_startup = true\n");
+        let loaded = load(&dir.file());
+        assert!(loaded.settings.jitter());
+        assert!(loaded.enable_on_startup);
+        assert_eq!(loaded.problem, None);
+
+        write(&dir.file(), "jitter_percent = 0\n");
+        assert!(!load(&dir.file()).settings.jitter());
+
+        write(
+            &dir.file(),
+            "jitter = false\njitter_percent = 30\nenable_on_startup = false\narm_on_startup = true\n",
+        );
+        let loaded = load(&dir.file());
+        assert!(!loaded.settings.jitter());
+        assert!(!loaded.enable_on_startup);
+    }
+
+    #[test]
+    fn a_bad_old_value_is_named_as_written() {
+        let dir = TempDir::new("legacy-bad");
+        write(
+            &dir.file(),
+            "jitter_percent = \"lots\"\narm_on_startup = 1\n",
+        );
+        let problem = load(&dir.file()).problem.unwrap();
+        for name in ["jitter_percent", "arm_on_startup"] {
+            assert!(problem.contains(name), "{name} not named in {problem:?}");
+        }
+    }
+
+    #[test]
+    fn each_button_choice_round_trips() {
+        let dir = TempDir::new("buttons");
+        for (buttons, name) in [
+            (ClickButtons::Left, "left"),
+            (ClickButtons::Both, "both"),
+            (ClickButtons::Right, "right"),
+        ] {
+            let d = Settings::default();
+            let settings =
+                Settings::new(d.cps(), d.activation_delay(), d.jitter(), buttons, None).unwrap();
+            save(&dir.file(), &settings, false).unwrap();
+            let text = fs::read_to_string(dir.file()).unwrap();
+            assert!(text.contains(&format!("buttons = \"{name}\"")), "{text}");
+            assert_eq!(load(&dir.file()).settings, settings);
+        }
     }
 
     #[test]
@@ -366,9 +467,10 @@ mod tests {
         for line in [
             "cps = 37",
             "activation_delay_ms = 600",
-            "jitter_percent = 30",
+            "jitter = true",
+            "buttons = \"right\"",
             "hotkey = \"Shift+Win+K\"",
-            "arm_on_startup = true",
+            "enable_on_startup = true",
         ] {
             assert!(text.contains(line), "{line:?} missing from:\n{text}");
         }
@@ -388,16 +490,23 @@ mod tests {
         let dir = TempDir::new("wrong-type");
         write(
             &dir.file(),
-            "cps = \"fast\"\nactivation_delay_ms = 600\njitter_percent = 12.5\nhotkey = 8\n",
+            "cps = \"fast\"\nactivation_delay_ms = 600\njitter = 1\nbuttons = 2\nhotkey = 8\n",
         );
         let loaded = load(&dir.file());
         let d = Settings::default();
         assert_eq!(
             loaded.settings,
-            Settings::new(d.cps(), Duration::from_millis(600), d.jitter(), d.hotkey()).unwrap()
+            Settings::new(
+                d.cps(),
+                Duration::from_millis(600),
+                d.jitter(),
+                d.buttons(),
+                d.hotkey()
+            )
+            .unwrap()
         );
         let problem = loaded.problem.unwrap();
-        for name in ["cps", "jitter_percent", "hotkey"] {
+        for name in ["cps", "jitter", "buttons", "hotkey"] {
             assert!(problem.contains(name), "{name} not named in {problem:?}");
         }
     }
@@ -420,16 +529,23 @@ mod tests {
         let dir = TempDir::new("partial");
         write(
             &dir.file(),
-            "cps = 99\nactivation_delay_ms = 600\njitter_percent = 51\nhotkey = \"Ctrl+Nope\"\n",
+            "cps = 99\nactivation_delay_ms = 600\nbuttons = \"middle\"\nhotkey = \"Ctrl+Nope\"\n",
         );
         let loaded = load(&dir.file());
         let d = Settings::default();
         assert_eq!(
             loaded.settings,
-            Settings::new(d.cps(), Duration::from_millis(600), d.jitter(), d.hotkey()).unwrap()
+            Settings::new(
+                d.cps(),
+                Duration::from_millis(600),
+                d.jitter(),
+                d.buttons(),
+                d.hotkey()
+            )
+            .unwrap()
         );
         let problem = loaded.problem.unwrap();
-        for name in ["cps", "jitter_percent", "hotkey"] {
+        for name in ["cps", "buttons", "hotkey"] {
             assert!(problem.contains(name), "{name} not named in {problem:?}");
         }
         assert!(!problem.contains("activation_delay_ms"), "{problem:?}");
@@ -443,8 +559,9 @@ mod tests {
         assert_eq!(
             load(&dir.file()),
             Loaded {
-                settings: Settings::new(20, d.activation_delay(), d.jitter(), d.hotkey()).unwrap(),
-                arm_on_startup: false,
+                settings: Settings::new(20, d.activation_delay(), d.jitter(), d.buttons(), None)
+                    .unwrap(),
+                enable_on_startup: false,
                 first_run: false,
                 problem: None
             }
@@ -454,19 +571,12 @@ mod tests {
     #[test]
     fn range_ends_are_accepted() {
         let dir = TempDir::new("ends");
-        write(
-            &dir.file(),
-            "cps = 50\nactivation_delay_ms = 50\njitter_percent = 50\n",
-        );
+        write(&dir.file(), "cps = 50\nactivation_delay_ms = 50\n");
         let loaded = load(&dir.file());
         assert_eq!(loaded.problem, None);
         assert_eq!(
-            (
-                loaded.settings.cps(),
-                loaded.settings.activation_delay(),
-                loaded.settings.jitter()
-            ),
-            (50, Duration::from_millis(50), 0.5)
+            (loaded.settings.cps(), loaded.settings.activation_delay()),
+            (50, Duration::from_millis(50))
         );
     }
 }

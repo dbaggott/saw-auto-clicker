@@ -26,7 +26,7 @@ type Reply = mpsc::SyncSender<Result<(), HotkeyError>>;
 /// `register` takes `&mut self` and waits for its answer.
 type Pending = Arc<Mutex<Option<(Option<Hotkey>, Reply)>>>;
 
-/// Owns the hotkey thread, where each press toggles armed. Registration runs
+/// Owns the hotkey thread, where each press toggles enabled. Registration runs
 /// on that thread, because `RegisterHotKey` without a window posts to the
 /// thread that called it. Dropping this unregisters the hotkey.
 pub struct HotkeyThread {
@@ -59,7 +59,7 @@ impl HotkeyThread {
                     }
                     match msg.message {
                         WM_HOTKEY if slot.is_current(msg.wParam.0 as i32) => {
-                            controller.toggle_armed();
+                            controller.toggle_enabled();
                         }
                         WM_REQUEST => {
                             if let Some((hotkey, reply)) = take(&incoming) {

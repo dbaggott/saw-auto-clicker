@@ -1,11 +1,12 @@
 //! What the user sees: short presses untouched (R3), holds auto-clicking per
-//! button (R4, R5), the armed state (R2), elevated targets (R16), and when
+//! button (R4, R5), the enabled state (R2), elevated targets (R16), and when
 //! changed settings apply (Q-c).
 
 use super::sim::*;
 use crate::clock::Time;
 use crate::gate::{Button, Direction, Source};
 use crate::scheduler::{Input, Status};
+use crate::settings::{ClickButtons, Settings};
 
 const LEFT: Button = Button::Left;
 const RIGHT: Button = Button::Right;
@@ -45,7 +46,7 @@ fn presses_shorter_than_the_delay_pass_untouched() {
         &[(0, 249)],
     ];
     for times in cases {
-        let mut sim = Sim::armed(settings(10, 250, 0.0));
+        let mut sim = Sim::enabled(settings(10, 250, false));
         presses(&mut sim, LEFT, times);
         sim.run_until(at_ms(5_000));
         assert!(sim.injections(LEFT).is_empty(), "{times:?}");
@@ -55,7 +56,7 @@ fn presses_shorter_than_the_delay_pass_untouched() {
 
 #[test]
 fn holding_one_button_clicks_only_that_button() {
-    let mut sim = Sim::armed(settings(10, 250, 0.0));
+    let mut sim = Sim::enabled(settings(10, 250, false));
     sim.press(LEFT, at_ms(0));
     sim.release(LEFT, at_ms(1_000));
     sim.run_until(at_ms(2_000));
@@ -66,8 +67,31 @@ fn holding_one_button_clicks_only_that_button() {
 }
 
 #[test]
+fn a_button_left_out_of_the_click_buttons_passes_untouched() {
+    for (buttons, clicking, untouched) in [
+        (ClickButtons::Left, LEFT, RIGHT),
+        (ClickButtons::Right, RIGHT, LEFT),
+    ] {
+        let s = Settings::new(10, ms(250), false, buttons, None).unwrap();
+        let mut sim = Sim::enabled(s);
+        sim.press(LEFT, at_ms(0));
+        sim.press(RIGHT, at_ms(0));
+        sim.release(LEFT, at_ms(1_000));
+        sim.release(RIGHT, at_ms(1_000));
+        sim.run_until(at_ms(2_000));
+        assert_eq!(sim.injections(clicking).len(), 14, "{buttons:?}");
+        assert!(sim.injections(untouched).is_empty(), "{buttons:?}");
+        assert_eq!(
+            physical(&sim, untouched),
+            expected(&[(0, 1_000)]),
+            "{buttons:?}"
+        );
+    }
+}
+
+#[test]
 fn both_buttons_run_independent_bursts() {
-    let mut sim = Sim::armed(settings(10, 250, 0.0));
+    let mut sim = Sim::enabled(settings(10, 250, false));
     sim.press(LEFT, at_ms(0));
     sim.press(RIGHT, at_ms(30));
     sim.release(LEFT, at_ms(600));
@@ -86,8 +110,8 @@ fn both_buttons_run_independent_bursts() {
 }
 
 #[test]
-fn disarmed_no_burst_starts_and_every_event_passes() {
-    let mut sim = Sim::new(settings(10, 250, 0.0));
+fn disabled_no_burst_starts_and_every_event_passes() {
+    let mut sim = Sim::new(settings(10, 250, false));
     let times = [(0, 2_000), (2_100, 2_150)];
     presses(&mut sim, LEFT, &times);
     presses(&mut sim, RIGHT, &times);
@@ -100,18 +124,21 @@ fn disarmed_no_burst_starts_and_every_event_passes() {
 }
 
 #[test]
-fn the_hotkey_toggles_armed_and_reports_it() {
-    let mut sim = Sim::new(settings(10, 250, 0.0));
-    sim.control_at(at_ms(0), Input::ToggleArmed);
+fn the_hotkey_toggles_enabled_and_reports_it() {
+    let mut sim = Sim::new(settings(10, 250, false));
+    sim.control_at(at_ms(0), Input::ToggleEnabled);
     sim.press(LEFT, at_ms(10));
     sim.release(LEFT, at_ms(500));
-    sim.control_at(at_ms(1_000), Input::ToggleArmed);
+    sim.control_at(at_ms(1_000), Input::ToggleEnabled);
     sim.press(LEFT, at_ms(1_010));
     sim.release(LEFT, at_ms(1_500));
     sim.run_until(at_ms(3_000));
     assert_eq!(
         sim.statuses(),
-        [(at_ms(0), Status::Armed), (at_ms(1_000), Status::Disarmed)]
+        [
+            (at_ms(0), Status::Enabled),
+            (at_ms(1_000), Status::Disabled)
+        ]
     );
     let injections = sim.injections(LEFT);
     assert!(!injections.is_empty());
@@ -120,7 +147,7 @@ fn the_hotkey_toggles_armed_and_reports_it() {
 
 #[test]
 fn a_target_not_injectable_at_the_delay_gets_no_burst() {
-    let mut sim = Sim::armed(settings(10, 250, 0.0));
+    let mut sim = Sim::enabled(settings(10, 250, false));
     sim.set_injectable_at(at_ms(0), false);
     let times = [(0, 1_000)];
     presses(&mut sim, LEFT, &times);
@@ -130,7 +157,7 @@ fn a_target_not_injectable_at_the_delay_gets_no_burst() {
     assert_eq!(
         sim.statuses(),
         [
-            (at_ms(0), Status::Armed),
+            (at_ms(0), Status::Enabled),
             (at_ms(250), Status::TargetNotInjectable(LEFT))
         ]
     );
@@ -138,7 +165,7 @@ fn a_target_not_injectable_at_the_delay_gets_no_burst() {
 
 #[test]
 fn a_target_turning_non_injectable_ends_the_burst_logically_down() {
-    let mut sim = Sim::armed(settings(10, 250, 0.0));
+    let mut sim = Sim::enabled(settings(10, 250, false));
     sim.press(LEFT, at_ms(0));
     sim.set_injectable_at(at_ms(400), false);
     sim.release(LEFT, at_ms(800));
@@ -160,9 +187,9 @@ fn a_target_turning_non_injectable_ends_the_burst_logically_down() {
 
 #[test]
 fn changed_settings_apply_from_the_next_press() {
-    let mut sim = Sim::armed(settings(10, 250, 0.0));
+    let mut sim = Sim::enabled(settings(10, 250, false));
     sim.press(LEFT, at_ms(0));
-    sim.control_at(at_ms(400), Input::SetSettings(settings(20, 100, 0.0)));
+    sim.control_at(at_ms(400), Input::SetSettings(settings(20, 100, false)));
     sim.release(LEFT, at_ms(700));
     sim.press(LEFT, at_ms(1_000));
     sim.release(LEFT, at_ms(1_300));
@@ -179,9 +206,9 @@ fn changed_settings_apply_from_the_next_press() {
 
 #[test]
 fn settings_changed_during_the_delay_wait_for_the_next_press() {
-    let mut sim = Sim::armed(settings(10, 250, 0.0));
+    let mut sim = Sim::enabled(settings(10, 250, false));
     sim.press(LEFT, at_ms(0));
-    sim.control_at(at_ms(100), Input::SetSettings(settings(20, 100, 0.0)));
+    sim.control_at(at_ms(100), Input::SetSettings(settings(20, 100, false)));
     sim.release(LEFT, at_ms(560));
     sim.run_until(at_ms(2_000));
     let downs: Vec<Time> = sim
@@ -194,10 +221,10 @@ fn settings_changed_during_the_delay_wait_for_the_next_press() {
 }
 
 #[test]
-fn a_press_held_across_arming_starts_no_burst() {
-    let mut sim = Sim::new(settings(10, 250, 0.0));
+fn a_press_held_across_enabling_starts_no_burst() {
+    let mut sim = Sim::new(settings(10, 250, false));
     sim.press(LEFT, at_ms(0));
-    sim.control_at(at_ms(100), Input::SetArmed(true));
+    sim.control_at(at_ms(100), Input::SetEnabled(true));
     sim.release(LEFT, at_ms(1_000));
     sim.run_until(at_ms(2_000));
     assert!(sim.injections(LEFT).is_empty());

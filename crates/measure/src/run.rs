@@ -1,4 +1,4 @@
-//! `saw-measure run`: the core on the Windows backend, armed at once, logging
+//! `saw-measure run`: the core on the Windows backend, enabled at once, logging
 //! every press, release and passed click until Ctrl+C.
 
 use std::fs::File;
@@ -9,7 +9,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use saw_core::{Button, Direction, Settings, Source, Status, Verdict};
+use saw_core::{Button, ClickButtons, Direction, Settings, Source, Status, Verdict};
 use saw_windows::{Clicker, ThrottlingOptOuts};
 use windows::Win32::System::Console::{CTRL_BREAK_EVENT, CTRL_C_EVENT, SetConsoleCtrlHandler};
 use windows::core::BOOL;
@@ -42,7 +42,8 @@ pub fn run(requested: RunInfo, log_path: &Path) -> Result<(), String> {
     let settings = Settings::new(
         requested.cps,
         Duration::from_millis(requested.delay_ms),
-        f64::from(requested.jitter_percent) / 100.0,
+        requested.jitter,
+        ClickButtons::Both,
         None,
     )
     .map_err(|e| e.to_string())?;
@@ -98,9 +99,9 @@ pub fn run(requested: RunInfo, log_path: &Path) -> Result<(), String> {
         eprintln!("Windows refused a throttling opt-out; the log header records what applied.");
     }
     let writer = thread::spawn(move || write_log(file, info, incoming));
-    clicker.controller().set_armed(true);
+    clicker.controller().set_enabled(true);
     println!(
-        "Armed at {} CPS. Hold a mouse button to click; Ctrl+C stops and prints the summary.",
+        "Enabled at {} CPS. Hold a mouse button to click; Ctrl+C stops and prints the summary.",
         info.cps
     );
 
