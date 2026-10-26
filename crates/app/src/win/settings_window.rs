@@ -33,10 +33,6 @@ const ACCENT: egui::Color32 = egui::Color32::from_rgb(
 const WIDTH: f32 = 540.0;
 const MARGIN: i8 = 16;
 
-const TRAY_HINT: &str = "saw-auto-clicker runs in the system tray, by the clock. \
-Closing this window leaves it running: click the saw blade there to come back \
-here, enable or disable auto-clicking, or quit. If you can't see it, it may be \
-behind the ^ arrow.";
 const CPS_HELP: &str = "The target clicks per second when auto-clicking.";
 const DELAY_HELP: &str =
     "The amount of time you must hold down a click before auto-clicking starts.";
@@ -85,14 +81,6 @@ pub fn show(app: &mut App, close_after_frames: Option<u32>) -> Result<Next, Stri
         options,
         Box::new(|cc| {
             style(&cc.egui_ctx);
-            let tray_icon = cc.egui_ctx.load_texture(
-                "tray icon",
-                egui::ColorImage::from_rgba_unmultiplied(
-                    [icon::SIZE as usize; 2],
-                    &icon::rgba(true),
-                ),
-                egui::TextureOptions::LINEAR,
-            );
             Ok(Box::new(Window {
                 app,
                 draft,
@@ -101,7 +89,6 @@ pub fn show(app: &mut App, close_after_frames: Option<u32>) -> Result<Next, Stri
                 modifiers,
                 enable_on_startup,
                 hotkey_unusable: None,
-                tray_icon,
                 flap_started: None,
                 next: &mut next,
                 requested_height: None,
@@ -173,7 +160,6 @@ struct Window<'a> {
     /// Why the hotkey the controls show can't be used, while the one before
     /// it stays in effect.
     hotkey_unusable: Option<String>,
-    tray_icon: egui::TextureHandle,
     flap_started: Option<f64>,
     next: &'a mut Next,
     /// The height last asked of the window, so a size the OS won't grant is
@@ -204,8 +190,6 @@ impl eframe::App for Window<'_> {
                 // Measured around the content: the panel itself always fills
                 // the window.
                 ui.vertical(|ui| {
-                    self.tray_hint(ui);
-                    ui.add_space(4.0);
                     self.settings(ui);
                     self.notices(ui);
                     ui.add_space(4.0);
@@ -238,23 +222,6 @@ impl eframe::App for Window<'_> {
 }
 
 impl Window<'_> {
-    fn tray_hint(&self, ui: &mut egui::Ui) {
-        egui::Frame::new()
-            .fill(ACCENT.gamma_multiply(0.12))
-            .corner_radius(10)
-            .inner_margin(egui::Margin::symmetric(12, 10))
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.horizontal(|ui| {
-                    ui.image(egui::load::SizedTexture::new(
-                        self.tray_icon.id(),
-                        egui::vec2(24.0, 24.0),
-                    ));
-                    ui.add(egui::Label::new(TRAY_HINT).wrap());
-                });
-            });
-    }
-
     fn settings(&mut self, ui: &mut egui::Ui) {
         let delay_ms = form::delay_ms_range();
         let d = &mut self.draft;

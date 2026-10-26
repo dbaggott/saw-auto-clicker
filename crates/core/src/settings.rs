@@ -12,7 +12,7 @@ pub const ACTIVATION_DELAY_RANGE: RangeInclusive<Duration> =
 /// The fastest clicking a person reaches by butterfly clicking, alternating
 /// two fingers on one button. The settings window's butterfly preset sets it,
 /// with Jitter on.
-pub const BUTTERFLY_CPS: u32 = 25;
+pub const BUTTERFLY_CPS: u32 = 12;
 
 /// The user's settings (R1), shared by every button that auto-clicks.
 /// Construction rejects values outside Q1–Q2's ranges, so a `Settings` is

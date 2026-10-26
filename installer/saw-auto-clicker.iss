@@ -56,6 +56,11 @@ WizardStyle=modern
 Compression=lzma2
 SolidCompression=yes
 
+[Messages]
+; Where a new user learns that the app lives in the tray.
+FinishedLabel=Setup has finished installing [name] on your computer.%n%n[name] runs in the system tray, by the clock, as a saw-blade icon. Click it to enable or disable auto-clicking, change settings, or quit. Windows may hide a new icon behind the ^ arrow; drag it onto the taskbar to keep it in view.
+FinishedLabelNoIcons=Setup has finished installing [name] on your computer.%n%n[name] runs in the system tray, by the clock, as a saw-blade icon. Click it to enable or disable auto-clicking, change settings, or quit. Windows may hide a new icon behind the ^ arrow; drag it onto the taskbar to keep it in view.
+
 [Tasks]
 Name: startatlogin; Description: "Start at login"; Flags: unchecked
 
