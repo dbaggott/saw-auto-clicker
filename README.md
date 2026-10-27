@@ -28,6 +28,8 @@ saw-auto-clicker can't click into a window running as administrator, such as Tas
 
 ## Development
 
+`mise trust && mise install` installs the Rust toolchain pinned in `rust-toolchain.toml`, with its components and Windows targets; `mise.toml` points mise at that file rather than repeating the version. Without mise, `rustup toolchain install` does the same, and is what CI runs.
+
 The workspace builds on any host. Windows-only code sits behind `cfg(windows)`, so on macOS or Linux `cargo clippy --workspace --all-targets` checks everything and `cargo test -p saw-core` runs the core's tests.
 
 Releases are cut by bumping `version` in the workspace `Cargo.toml` and adding a `## v<version>` section to `CHANGELOG.md`, which becomes the release notes, then running `cargo check` so `Cargo.lock` records the new version too; CI builds with `--locked` and fails on a stale lock file. When a push to main carries a version that has no release yet, CI tests and builds it as usual, installs and uninstalls the installer on x64 and Arm64, checks that the installed app reports the new version, and publishes a GitHub release tagged `v<version>` at that commit with the installer attached (`.github/workflows/release.yml`). A version with a hyphen, such as `1.0.0-rc.1`, publishes a pre-release. The download page links to the latest release, which GitHub never resolves to a pre-release.

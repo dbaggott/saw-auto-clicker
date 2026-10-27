@@ -1,0 +1,7 @@
+# Read the Rust version from rust-toolchain.toml, which CI's rustup also reads,
+# so the version is pinned in one place. Checked on 2026.5.7, which installs
+# the file's components and targets too.
+min_version = "2026.5.7"
+
+[settings]
+idiomatic_version_file_enable_tools = ["rust"]
