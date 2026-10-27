@@ -2,6 +2,10 @@
 
 Each release's notes are its section here. CI fails when the workspace version in `Cargo.toml` has no section, so bumping the version means writing one.
 
+## v0.6.0
+
+- Closing the settings window shows the saw-blade icon flying into the system tray, so you can see where the app went. It is skipped when Animation effects are off in Windows' settings.
+
 ## v0.5.0
 
 - The installer's last page explains that the app lives in the system tray. Starting the app opens its settings window, and starting it again while it runs opens that window instead of a message. Start at login still starts it quietly in the tray.

@@ -20,7 +20,9 @@ use crate::apply::apply;
 use crate::config;
 use crate::status::{BurstWatch, TrayState, hotkey_missing};
 use crate::win::autostart::StartAtLogin;
+use crate::win::fly_to_tray;
 use crate::win::instance::{listen_for_show_settings, show_error};
+use crate::win::settings_window::{self, Closed};
 use crate::win::tray::{MenuAction, Tray};
 
 /// What the clicker's threads, and a second launch, tell the main thread.
@@ -192,8 +194,15 @@ impl App {
             match next {
                 Next::Wait => {}
                 Next::OpenSettings => {
-                    match crate::win::settings_window::show(&mut self, None) {
-                        Ok(Next::Quit) => break,
+                    match settings_window::show(&mut self, None) {
+                        Ok(Closed {
+                            next: Next::Quit, ..
+                        }) => break,
+                        Ok(Closed {
+                            rect: Some(window),
+                            scale,
+                            ..
+                        }) => fly_to_tray::fly(window, self.tray.rect(), scale, self.enabled()),
                         Ok(_) => {}
                         // The tray and the clicker carry on without the window.
                         Err(e) => show_error(&e),
@@ -343,7 +352,9 @@ fn start_at_login_checked(entry: &StartAtLogin) -> bool {
         .unwrap_or(false)
 }
 
-fn pump_waiting_messages() {
+/// Dispatches every message waiting for this thread, without waiting for
+/// more.
+pub fn pump_waiting_messages() {
     let mut msg = MSG::default();
     while unsafe { PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE) }.as_bool() {
         if msg.message == WM_QUIT {

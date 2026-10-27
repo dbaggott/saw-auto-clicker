@@ -1,6 +1,6 @@
 //! Runs `saw-app --self-test` on a real Windows desktop: the app starts,
 //! creates its tray icon, enables, opens and closes its settings window twice,
-//! and quits cleanly.
+//! playing the flight to the tray after each, and quits cleanly.
 #![cfg(windows)]
 
 use std::process::{Command, Stdio};

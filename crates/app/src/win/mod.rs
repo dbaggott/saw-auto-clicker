@@ -3,6 +3,7 @@
 mod app;
 mod autostart;
 mod butterfly;
+mod fly_to_tray;
 mod instance;
 mod settings_window;
 mod tray;
@@ -14,6 +15,8 @@ use app::{App, Next, Persist};
 use autostart::AT_LOGIN;
 use instance::{SingleInstance, ask_running_instance_to_show_settings, show_error, show_info};
 use saw_core::{Hotkey, Key, Modifiers};
+
+use crate::flight::{self, ScreenRect};
 
 const USAGE: &str = "Usage: saw-app [--at-login | --self-test | --version]";
 
@@ -78,9 +81,10 @@ fn run(launch: Launch) -> ExitCode {
 }
 
 /// `--self-test`: starts the whole app, waits for it to enable, opens and
-/// closes the settings window twice with the tray running, applies the
-/// settings with Ctrl+Alt+F8 and then as loaded, and quits through the same
-/// path as the tray's Quit. Reports each step on stdout and exits non-zero
+/// closes the settings window twice with the tray running, playing the
+/// flight to the tray after each close, applies the settings with
+/// Ctrl+Alt+F8 and then as loaded, and quits through the same path as the
+/// tray's Quit. Reports each step on stdout and exits non-zero
 /// on the first failure. It never writes the settings file or the registry,
 /// and refuses to run while another instance is running, which it would
 /// otherwise disturb.
@@ -94,8 +98,21 @@ fn self_test() -> ExitCode {
         app.wait_until_enabled(Duration::from_secs(5))?;
         println!("enabled");
         for round in 1..=2 {
-            settings_window::show(&mut app, Some(30))?;
+            let closed = settings_window::show(&mut app, Some(30))?;
             println!("settings window {round}: drew 30 frames and closed");
+            // Played directly, since `fly` skips it wherever animation
+            // effects are off or there is no taskbar.
+            let window = closed
+                .rect
+                .ok_or("the settings window's position was never reported")?;
+            let corner = ScreenRect {
+                width: 16.0,
+                height: 16.0,
+                ..window
+            };
+            fly_to_tray::play(window, corner, flight::START_SIZE * closed.scale, true)
+                .map_err(|e| format!("the flight to the tray failed: {e}"))?;
+            println!("flight {round}: played");
             app.handle_arrivals();
         }
         let loaded = app.settings.clone();
