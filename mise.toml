@@ -1,0 +1,4 @@
+# Read the Rust version from rust-toolchain.toml, which CI's rustup also reads,
+# so the version is pinned in one place.
+[settings]
+idiomatic_version_file_enable_tools = ["rust"]
