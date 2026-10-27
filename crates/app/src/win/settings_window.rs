@@ -8,6 +8,7 @@ use std::time::Duration;
 use eframe::egui;
 use saw_core::{BUTTERFLY_CPS, CPS_RANGE, ClickButtons, Hotkey, Key, Modifiers};
 
+use crate::flight::ScreenRect;
 use crate::form::{self, Draft};
 use crate::hotkey_text::{self, KEYS, key_name};
 use crate::icon;
@@ -44,10 +45,19 @@ const ENABLE_ON_STARTUP_HELP: &str = "By default, the app starts disabled to pre
 accidental auto-clicking. Select this if you want the auto-clicker to \
 automatically enable itself on startup.";
 
-/// Shows the window until it closes, and says whether Quit was chosen from
-/// the tray meanwhile. `close_after_frames` closes it by itself once it has
-/// drawn that many frames, for the self-test.
-pub fn show(app: &mut App, close_after_frames: Option<u32>) -> Result<Next, String> {
+/// How the window closed.
+pub struct Closed {
+    /// [`Next::Quit`] when Quit was chosen from the tray meanwhile.
+    pub next: Next,
+    /// Where the window last was, unless Windows never said.
+    pub rect: Option<ScreenRect>,
+    /// Physical pixels per point where the window last was.
+    pub scale: f64,
+}
+
+/// Shows the window until it closes. `close_after_frames` closes it by
+/// itself once it has drawn that many frames, for the self-test.
+pub fn show(app: &mut App, close_after_frames: Option<u32>) -> Result<Closed, String> {
     let viewport = egui::ViewportBuilder::default()
         .with_title("saw-auto-clicker settings")
         .with_inner_size([WIDTH, 360.0])
@@ -64,7 +74,11 @@ pub fn show(app: &mut App, close_after_frames: Option<u32>) -> Result<Next, Stri
         centered: true,
         ..eframe::NativeOptions::default()
     };
-    let mut next = Next::Wait;
+    let mut closed = Closed {
+        next: Next::Wait,
+        rect: None,
+        scale: 1.0,
+    };
     let draft = Draft::from(&app.settings);
     let enable_on_startup = app.enable_on_startup;
     let modifiers = draft.hotkey.map_or(
@@ -90,7 +104,7 @@ pub fn show(app: &mut App, close_after_frames: Option<u32>) -> Result<Next, Stri
                 enable_on_startup,
                 hotkey_unusable: None,
                 flap_started: None,
-                next: &mut next,
+                closed: &mut closed,
                 requested_height: None,
                 frames: 0,
                 close_after_frames,
@@ -98,7 +112,7 @@ pub fn show(app: &mut App, close_after_frames: Option<u32>) -> Result<Next, Stri
         }),
     )
     .map_err(|e| format!("the settings window failed: {e}"))?;
-    Ok(next)
+    Ok(closed)
 }
 
 /// Roomier spacing, rounder corners and the icon's orange as the accent, in
@@ -161,7 +175,7 @@ struct Window<'a> {
     /// it stays in effect.
     hotkey_unusable: Option<String>,
     flap_started: Option<f64>,
-    next: &'a mut Next,
+    closed: &'a mut Closed,
     /// The height last asked of the window, so a size the OS won't grant is
     /// asked for once rather than every frame.
     requested_height: Option<f32>,
@@ -175,9 +189,19 @@ impl eframe::App for Window<'_> {
             Next::Wait => {}
             Next::OpenSettings => ctx.send_viewport_cmd(egui::ViewportCommand::Focus),
             Next::Quit => {
-                *self.next = Next::Quit;
+                self.closed.next = Next::Quit;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
+        }
+        let scale = ctx.pixels_per_point();
+        if let Some(rect) = ctx.input(|i| i.viewport().outer_rect) {
+            self.closed.rect = Some(ScreenRect {
+                left: f64::from(rect.left() * scale),
+                top: f64::from(rect.top() * scale),
+                width: f64::from(rect.width() * scale),
+                height: f64::from(rect.height() * scale),
+            });
+            self.closed.scale = f64::from(scale);
         }
         ctx.request_repaint_after(POLL);
     }

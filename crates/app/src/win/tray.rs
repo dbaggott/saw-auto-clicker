@@ -3,6 +3,7 @@
 use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 
+use crate::flight::ScreenRect;
 use crate::icon;
 use crate::status::TrayState;
 
@@ -81,6 +82,17 @@ impl Tray {
         let _ = self.icon.set_icon(Some(icon.clone()));
         let _ = self.icon.set_tooltip(Some(state.tooltip()));
         self.toggle.set_text(state.toggle_label());
+    }
+
+    /// Where the icon is on screen, when Windows says. For an icon in the
+    /// overflow area that is somewhere off the taskbar, or nowhere.
+    pub fn rect(&self) -> Option<ScreenRect> {
+        self.icon.rect().map(|rect| ScreenRect {
+            left: rect.position.x,
+            top: rect.position.y,
+            width: rect.size.width.into(),
+            height: rect.size.height.into(),
+        })
     }
 
     pub fn set_start_at_login(&self, on: bool) {

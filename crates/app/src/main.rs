@@ -11,6 +11,8 @@ mod apply;
 #[cfg_attr(not(windows), allow(dead_code))]
 mod config;
 #[cfg_attr(not(windows), allow(dead_code))]
+mod flight;
+#[cfg_attr(not(windows), allow(dead_code))]
 mod form;
 #[cfg_attr(not(windows), allow(dead_code))]
 mod hotkey_text;

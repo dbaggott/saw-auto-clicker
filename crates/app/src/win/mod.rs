@@ -3,6 +3,7 @@
 mod app;
 mod autostart;
 mod butterfly;
+mod fly_to_tray;
 mod instance;
 mod settings_window;
 mod tray;
