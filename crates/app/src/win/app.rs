@@ -202,7 +202,7 @@ impl App {
                             rect: Some(window),
                             scale,
                             ..
-                        }) => fly_to_tray::fly(window, self.tray.rect(), scale),
+                        }) => fly_to_tray::fly(window, self.tray.rect(), scale, self.enabled()),
                         Ok(_) => {}
                         // The tray and the clicker carry on without the window.
                         Err(e) => show_error(&e),
@@ -352,7 +352,9 @@ fn start_at_login_checked(entry: &StartAtLogin) -> bool {
         .unwrap_or(false)
 }
 
-fn pump_waiting_messages() {
+/// Dispatches every message waiting for this thread, without waiting for
+/// more.
+pub fn pump_waiting_messages() {
     let mut msg = MSG::default();
     while unsafe { PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE) }.as_bool() {
         if msg.message == WM_QUIT {

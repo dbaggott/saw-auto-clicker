@@ -1,7 +1,6 @@
 //! Plays the saw-blade icon's [flight](crate::flight) into the tray in a
 //! see-through, topmost window that takes neither clicks nor the focus.
 
-use std::sync::Once;
 use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
@@ -23,14 +22,16 @@ use windows::core::{BOOL, PCWSTR, Result, w};
 
 use crate::flight::{self, Frame, ScreenRect};
 use crate::icon;
+use crate::win::app::pump_waiting_messages;
 
 const CLASS: PCWSTR = w!("saw-auto-clicker-fly-to-tray");
 
-/// Flies the icon from `from`, where the settings window was, to the tray
-/// icon at `tray_icon`, starting at a size for `scale` physical pixels per
-/// point. Does nothing when Windows' animation effects are off or there is
-/// nowhere to fly to, and returns once the icon is gone.
-pub fn fly(from: ScreenRect, tray_icon: Option<ScreenRect>, scale: f64) {
+/// Flies the icon, in its `enabled` look, from `from`, where the settings
+/// window was, to the tray icon at `tray_icon`, starting at a size for
+/// `scale` physical pixels per point. Does nothing when Windows' animation
+/// effects are off or there is nowhere to fly to, and returns once the icon
+/// is gone.
+pub fn fly(from: ScreenRect, tray_icon: Option<ScreenRect>, scale: f64, enabled: bool) {
     if !animation_effects_on() {
         return;
     }
@@ -43,7 +44,7 @@ pub fn fly(from: ScreenRect, tray_icon: Option<ScreenRect>, scale: f64) {
         return;
     };
     // A failure costs only the animation; the window has already closed.
-    let _ = play(from, to, flight::START_SIZE * scale);
+    let _ = play(from, to, flight::START_SIZE * scale, enabled);
 }
 
 /// Windows' Settings > Accessibility > Visual effects > Animation effects.
@@ -85,23 +86,31 @@ fn window_rect(window: HWND) -> Option<ScreenRect> {
     })
 }
 
-/// Runs the flight on this thread, a frame per screen refresh, without
-/// pumping messages: anything arriving meanwhile waits the flight's length.
-fn play(from: ScreenRect, to: ScreenRect, start_size: f64) -> Result<()> {
+/// Runs the flight on this thread, a frame per screen refresh, pumping
+/// messages between frames.
+pub fn play(from: ScreenRect, to: ScreenRect, start_size: f64, enabled: bool) -> Result<()> {
     let largest = start_size.max(to.width.min(to.height)).ceil() as i32;
-    let mut sprite = Sprite::new(largest)?;
+    let mut sprite = Sprite::new(largest, enabled)?;
     let start = Instant::now();
     loop {
+        let frame_start = Instant::now();
         let t = start.elapsed().as_secs_f64() / flight::DURATION.as_secs_f64();
         if t >= 1.0 {
             return Ok(());
         }
         sprite.show(flight::frame(from, to, start_size, t))?;
-        if unsafe { DwmFlush() }.is_err() {
-            std::thread::sleep(Duration::from_millis(16));
+        pump_waiting_messages();
+        // DwmFlush waits for the next refresh, except where nothing is being
+        // composed, such as on a locked screen, when it returns at once.
+        let _ = unsafe { DwmFlush() };
+        if let Some(rest) = MIN_FRAME.checked_sub(frame_start.elapsed()) {
+            std::thread::sleep(rest);
         }
     }
 }
+
+/// The shortest frame, which caps the rate where [`DwmFlush`] doesn't wait.
+const MIN_FRAME: Duration = Duration::from_millis(8);
 
 /// The layered window and the bitmap it is drawn from, both freed on drop.
 struct Sprite {
@@ -114,25 +123,24 @@ struct Sprite {
     /// premultiplied BGRA.
     pixels: *mut u8,
     canvas: i32,
+    enabled: bool,
     shown: bool,
 }
 
 impl Sprite {
     /// A hidden window, and a bitmap `canvas` pixels square to draw each
-    /// frame into, at its top left.
-    fn new(canvas: i32) -> Result<Sprite> {
+    /// frame of the icon's `enabled` look into, at its top left.
+    fn new(canvas: i32, enabled: bool) -> Result<Sprite> {
         let instance = unsafe { GetModuleHandleW(None) }?;
-        static REGISTER: Once = Once::new();
-        REGISTER.call_once(|| {
-            let class = WNDCLASSW {
-                lpfnWndProc: Some(window_proc),
-                hInstance: instance.into(),
-                lpszClassName: CLASS,
-                ..WNDCLASSW::default()
-            };
-            // A failure shows as CreateWindowExW's below.
-            unsafe { RegisterClassW(&class) };
-        });
+        let class = WNDCLASSW {
+            lpfnWndProc: Some(window_proc),
+            hInstance: instance.into(),
+            lpszClassName: CLASS,
+            ..WNDCLASSW::default()
+        };
+        // Fails harmlessly once a previous flight has registered the class;
+        // any other failure shows as CreateWindowExW's below.
+        unsafe { RegisterClassW(&class) };
         let mut sprite = Sprite {
             window: HWND::default(),
             dc: HDC::default(),
@@ -140,6 +148,7 @@ impl Sprite {
             replaced: HGDIOBJ::default(),
             pixels: std::ptr::null_mut(),
             canvas,
+            enabled,
             shown: false,
         };
         sprite.window = unsafe {
@@ -189,7 +198,7 @@ impl Sprite {
         let size = (frame.size.round() as i32).clamp(1, self.canvas);
         let canvas = self.canvas as usize;
         let pixels = unsafe { std::slice::from_raw_parts_mut(self.pixels, canvas * canvas * 4) };
-        let drawing = icon::rgba_at(size as u32, true);
+        let drawing = icon::rgba_at(size as u32, self.enabled);
         for (row, line) in drawing.chunks_exact(size as usize * 4).enumerate() {
             let out = &mut pixels[row * canvas * 4..][..line.len()];
             for (to, &[r, g, b, a]) in out
