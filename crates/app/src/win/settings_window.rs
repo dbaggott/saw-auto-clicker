@@ -40,8 +40,8 @@ const DELAY_HELP: &str =
 const JITTER_HELP: &str = "Adds natural variation to the click rate.";
 const CLICKS_HELP: &str = "Which types of clicks auto-click when held down.";
 const HOTKEY_HELP: &str = "An optional keyboard shortcut that enables and disables auto-clicking.";
-const ENABLE_ON_STARTUP_HELP: &str = "Controls whether the auto-clicker is enabled on \
-system startup, by default it starts disabled to prevent accidental auto-clicking.";
+const ENABLE_ON_STARTUP_HELP: &str = "Controls whether the auto-clicker is enabled \
+when the app starts, by default it starts disabled to prevent accidental auto-clicking.";
 
 /// How the window closed.
 pub struct Closed {
