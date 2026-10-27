@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-pub const DURATION: Duration = Duration::from_millis(280);
+pub const DURATION: Duration = Duration::from_millis(500);
 
 /// How big the icon starts, in pixels at 100% display scaling.
 pub const START_SIZE: f64 = 48.0;
