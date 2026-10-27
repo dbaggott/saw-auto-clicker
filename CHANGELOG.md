@@ -2,6 +2,10 @@
 
 Each release's notes are its section here. CI fails when the workspace version in `Cargo.toml` has no section, so bumping the version means writing one.
 
+## v0.6.1
+
+- Reworded the explanations for the Clicks and Enable on startup settings and the butterfly button.
+
 ## v0.6.0
 
 - Closing the settings window shows the saw-blade icon flying into the system tray, so you can see where the app went. It is skipped when Animation effects are off in Windows' settings.

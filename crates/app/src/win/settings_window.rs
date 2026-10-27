@@ -38,12 +38,10 @@ const CPS_HELP: &str = "The target clicks per second when auto-clicking.";
 const DELAY_HELP: &str =
     "The amount of time you must hold down a click before auto-clicking starts.";
 const JITTER_HELP: &str = "Adds natural variation to the click rate.";
-const CLICKS_HELP: &str = "Which mouse buttons auto-click when held down. A \
-button that is left out always clicks normally.";
+const CLICKS_HELP: &str = "Which types of clicks auto-click when held down.";
 const HOTKEY_HELP: &str = "An optional keyboard shortcut that enables and disables auto-clicking.";
-const ENABLE_ON_STARTUP_HELP: &str = "By default, the app starts disabled to prevent \
-accidental auto-clicking. Select this if you want the auto-clicker to \
-automatically enable itself on startup.";
+const ENABLE_ON_STARTUP_HELP: &str = "Controls whether the auto-clicker is enabled \
+when the app starts, by default it starts disabled to prevent accidental auto-clicking.";
 
 /// How the window closed.
 pub struct Closed {
@@ -410,8 +408,9 @@ impl Window<'_> {
 
 fn butterfly_help(on: bool) -> String {
     let what = format!(
-        "Simulates the human-achievable clicks per second from butterfly \
-         clicking: {BUTTERFLY_CPS} clicks per second, with Jitter on."
+        "Configures the clicks per second to {BUTTERFLY_CPS} with Jitter enabled, \
+         this attempts to simulate human-achievable click speeds via the butterfly \
+         technique."
     );
     if on {
         format!("{what}\n\nButterfly clicking is on.")

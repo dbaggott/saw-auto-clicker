@@ -2794,7 +2794,7 @@ dependencies = [
 
 [[package]]
 name = "saw-app"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "eframe",
  "ico",
@@ -2809,14 +2809,14 @@ dependencies = [
 
 [[package]]
 name = "saw-core"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "fastrand",
 ]
 
 [[package]]
 name = "saw-measure"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "saw-core",
  "saw-windows",
@@ -2825,7 +2825,7 @@ dependencies = [
 
 [[package]]
 name = "saw-windows"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "saw-core",
  "windows",
