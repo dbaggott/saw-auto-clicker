@@ -29,8 +29,8 @@ pub(crate) struct Cycle {
 }
 
 /// One burst's click deadlines under D5, on a moving grid. Click k's nominal
-/// down is the one before it plus `T_k = 1 / rate(n_{k−1})`, where the rate
-/// is [`Drift`]'s, or the set CPS when there is no drift. Its down is at
+/// down is the one before it plus `T_k`, the [`Rate`]'s interval at the
+/// nominal down before it. Its down is at
 /// `n_k + o_k`, with `o_k` uniform in ±(J/2)·T_k, so offsets never
 /// accumulate. The up before it leads it by the up-time `g_k · u_k`, where
 /// `g_k` is the interval since the previous down and `u_k` is uniform in
@@ -40,23 +40,18 @@ pub(crate) struct Cycle {
 /// `start` is the logical down the physical press created, which stands in for
 /// click 0's nominal and actual down.
 pub(crate) struct Grid {
-    interval: Duration,
+    rate: Rate,
     jitter: f64,
-    drift: Option<Drift>,
     rng: Rng,
     nominal: Time,
     prev_down: Time,
 }
 
 impl Grid {
-    /// A grid at `cps` with Jitter `jitter` whose rate drifts by `spread` of
-    /// the CPS either side, or holds at the CPS when `spread` is 0.
-    pub(crate) fn new(start: Time, cps: u32, jitter: f64, spread: f64, mut rng: Rng) -> Grid {
-        let drift = (spread > 0.0).then(|| Drift::new(start, cps, spread, &mut rng));
+    pub(crate) fn new(start: Time, rate: Rate, jitter: f64, rng: Rng) -> Grid {
         Grid {
-            interval: Duration::from_secs(1) / cps,
+            rate,
             jitter,
-            drift,
             rng,
             nominal: start,
             prev_down: start,
@@ -66,9 +61,9 @@ impl Grid {
     /// The next click's deadlines. Every click is drawn in turn, including
     /// those the scheduler then skips, so the grid never depends on timing.
     pub(crate) fn next_cycle(&mut self) -> Cycle {
-        let interval = match &mut self.drift {
-            Some(drift) => drift.interval_at(self.nominal, &mut self.rng),
-            None => self.interval,
+        let interval = match &mut self.rate {
+            Rate::Fixed(interval) => *interval,
+            Rate::Drifting(drift) => drift.interval_at(self.nominal, &mut self.rng),
         };
         self.nominal = self.nominal + interval;
         let offset_ns = self.symmetric() * self.jitter / 2.0 * interval.as_nanos() as f64;
@@ -115,10 +110,28 @@ pub(crate) fn interval_band(cps: u32) -> (Duration, Duration) {
     )
 }
 
+/// How fast a [`Grid`] clicks: at one nominal interval, or drifting.
+pub(crate) enum Rate {
+    Fixed(Duration),
+    Drifting(Drift),
+}
+
+impl Rate {
+    /// A rate starting at `start` that drifts by `spread` of `cps` either side,
+    /// drawing its targets from `rng`.
+    pub(crate) fn drifting(start: Time, cps: u32, spread: f64, rng: &mut Rng) -> Rate {
+        debug_assert!(
+            (0.0..1.0).contains(&spread),
+            "spread {spread} outside [0, 1)"
+        );
+        Rate::Drifting(Drift::new(start, cps, spread, rng))
+    }
+}
+
 /// D5's drifting rate: piecewise linear in nominal time, ramping across each
 /// [`RATE_SEGMENT`] from one target to the next, with every target drawn
 /// uniformly from [`rate_band`]. The rate starts at a draw, not at the CPS.
-struct Drift {
+pub(crate) struct Drift {
     slowest: f64,
     fastest: f64,
     segment_start: Time,
@@ -168,7 +181,9 @@ mod tests {
     fn check_grid(cps: u32, seed: u64, clicks: usize) {
         let jitter = HUMAN_JITTER;
         let start = Time::from_epoch(Duration::from_millis(250));
-        let mut grid = Grid::new(start, cps, jitter, RATE_SPREAD, Rng::with_seed(seed));
+        let mut rng = Rng::with_seed(seed);
+        let rate = Rate::drifting(start, cps, RATE_SPREAD, &mut rng);
+        let mut grid = Grid::new(start, rate, jitter, rng);
         let (t_fast, t_slow) = interval_band(cps);
         let tolerance = Duration::from_nanos(2);
         let mut prev_nominal = start;
@@ -227,7 +242,9 @@ mod tests {
     #[test]
     fn at_the_top_of_the_range_the_band_is_clamped() {
         let start = Time::ZERO;
-        let mut grid = Grid::new(start, 50, HUMAN_JITTER, RATE_SPREAD, Rng::with_seed(3));
+        let mut rng = Rng::with_seed(3);
+        let rate = Rate::drifting(start, 50, RATE_SPREAD, &mut rng);
+        let mut grid = Grid::new(start, rate, HUMAN_JITTER, rng);
         let mut prev = start;
         let mut fastest = Duration::MAX;
         for _ in 0..3_000 {
@@ -236,15 +253,5 @@ mod tests {
             prev = grid.nominal;
         }
         assert!(fastest + Duration::from_nanos(2) >= Duration::from_millis(20));
-    }
-
-    #[test]
-    fn without_spread_the_grid_is_fixed() {
-        let start = Time::from_epoch(Duration::from_millis(250));
-        let mut grid = Grid::new(start, 15, HUMAN_JITTER, 0.0, Rng::with_seed(1));
-        for k in 1..=100u32 {
-            grid.next_cycle();
-            assert_eq!(grid.nominal, start + Duration::from_secs(1) / 15 * k);
-        }
     }
 }

@@ -13,7 +13,7 @@ Some tasks need sustained rapid clicking, which is tiring and uneven by hand. Ex
 - **Hold-to-click.** While the app is enabled, holding the left or right button longer than a configured delay starts auto-clicking that button at a target clicks-per-second (CPS). Releasing the button stops it.
 - **Normal input stays normal.** A press shorter than the delay, and any input while the app is disabled, reaches applications unchanged. While enabled, *any* hold longer than the delay auto-clicks, including drags, text selection and long-presses. That is intended, and the hotkey exists so the user can disable for that kind of work; the README says so.
 - **Small and in the background.** A tray icon, a small settings window, a global hotkey that toggles enabled/disabled, and optional start at login.
-- **Jitter.** An optional setting that varies click timing so clicks aren't perfectly uniform, without changing the average rate.
+- **Jitter.** An optional setting that varies click timing so clicks aren't perfectly uniform, and lets the click rate drift around the target CPS during a hold, as a person's does (D5).
 - **Portable core.** Platform code sits behind a narrow backend interface, so macOS and Linux are additions rather than rewrites.
 
 ## Non-goals

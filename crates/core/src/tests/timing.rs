@@ -1,12 +1,14 @@
-//! Click timing: D5's Jitter and rate drift (R7), D8's lockstep and skipped deadlines, the
-//! liveness timeout, and when the observation is reinstalled.
+//! Click timing: D5's Jitter and rate drift (R7), D8's lockstep and skipped
+//! deadlines, the liveness timeout, and when the observation is reinstalled.
 
 use std::time::Duration;
+
+use fastrand::Rng;
 
 use super::sim::*;
 use crate::clock::Time;
 use crate::gate::{Button, Direction};
-use crate::jitter::{HUMAN_JITTER, MIN_PHASE, interval_band};
+use crate::jitter::{Cycle, Grid, HUMAN_JITTER, MIN_PHASE, RATE_SPREAD, Rate, interval_band};
 use crate::scheduler::Input;
 
 const LEFT: Button = Button::Left;
@@ -47,9 +49,11 @@ fn without_jitter_downs_are_exactly_one_interval_apart() {
     }
 }
 
-/// Holds for `hold` and checks, on every click, what the injections can show
-/// of D5: each interval within the envelope the band allows, and the up-time
-/// share and floors. The nominal grid itself is checked in `jitter`'s tests.
+/// Holds for `hold` and checks that every injection lands on the deadline of
+/// the burst's own grid, so none is skipped or shifted and `jitter`'s tests
+/// of the grid hold for what is injected. Then checks, on every click, what
+/// the injections show of D5: each interval within the envelope the band
+/// allows, and the up-time share and floors.
 fn check_jitter(cps: u32, seed: u64, hold: Duration) {
     let jitter = HUMAN_JITTER;
     let s = settings(cps, 250, true);
@@ -62,13 +66,21 @@ fn check_jitter(cps: u32, seed: u64, hold: Duration) {
     sim.run_until(release + Duration::from_secs(1));
 
     let injected = injected(&sim);
-    // Every cycle ran: none was skipped for a late echo.
-    let fewest = (hold.as_secs_f64() / t_slow.as_secs_f64()) as usize - 1;
-    assert!(
-        injected.len() >= 2 * fewest,
-        "{} injections at {cps} CPS",
-        injected.len()
-    );
+    // The scheduler forks the burst's Rng from its own, seeded with `seed`.
+    let mut rng = Rng::with_seed(seed).fork();
+    let start = at_ms(250);
+    let rate = Rate::drifting(start, cps, RATE_SPREAD, &mut rng);
+    let mut grid = Grid::new(start, rate, jitter, rng);
+    let pairs = injected.as_chunks::<2>().0;
+    assert!(pairs.len() > 100, "{} cycles at {cps} CPS", pairs.len());
+    for (k, pair) in pairs.iter().enumerate() {
+        let Cycle { up, down } = grid.next_cycle();
+        assert_eq!(
+            *pair,
+            [(up, Direction::Up), (down, Direction::Down)],
+            "{cps} CPS, cycle {k}"
+        );
+    }
     let tolerance = Duration::from_nanos(2);
     let lo = t_fast.mul_f64(1.0 - jitter / 2.0) - t_slow.mul_f64(jitter / 2.0);
     let hi = t_slow.mul_f64(1.0 + jitter);
