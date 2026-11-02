@@ -1,4 +1,4 @@
-//! Click timing: D5's Jitter (R7), D8's lockstep and skipped deadlines, the
+//! Click timing: D5's Jitter and rate drift (R7), D8's lockstep and skipped deadlines, the
 //! liveness timeout, and when the observation is reinstalled.
 
 use std::time::Duration;
@@ -6,8 +6,9 @@ use std::time::Duration;
 use super::sim::*;
 use crate::clock::Time;
 use crate::gate::{Button, Direction};
-use crate::jitter::{HUMAN_JITTER, MIN_PHASE};
+use crate::jitter::{HUMAN_JITTER, MIN_PHASE, RATE_SPREAD};
 use crate::scheduler::Input;
+use crate::settings::CPS_RANGE;
 
 const LEFT: Button = Button::Left;
 
@@ -47,39 +48,52 @@ fn without_jitter_downs_are_exactly_one_interval_apart() {
     }
 }
 
-/// Holds for `clicks` nominal intervals and checks R7 and D5 on every click.
-fn check_jitter(cps: u32, seed: u64, clicks: u32) {
+/// The band's fastest and slowest nominal intervals at `cps` (D5).
+fn band(cps: u32) -> (Duration, Duration) {
+    let cps = f64::from(cps);
+    let fastest = (cps * (1.0 + RATE_SPREAD)).min(f64::from(*CPS_RANGE.end()));
+    let slowest = cps * (1.0 - RATE_SPREAD);
+    (
+        Duration::from_secs_f64(1.0 / fastest),
+        Duration::from_secs_f64(1.0 / slowest),
+    )
+}
+
+/// Holds for `hold` and checks, on every click, what the injections can show
+/// of D5: each interval within the envelope the band allows, and the up-time
+/// share and floors. The nominal grid itself is checked in `jitter`'s tests.
+fn check_jitter(cps: u32, seed: u64, hold: Duration) {
     let jitter = HUMAN_JITTER;
     let s = settings(cps, 250, true);
-    let t = s.interval();
+    let (t_fast, t_slow) = band(cps);
     let mut sim = Sim::with_seed(s, seed);
     sim.control_at(Time::ZERO, Input::SetEnabled(true));
     sim.press(LEFT, at_ms(0));
-    let release = at_ms(250) + t * clicks;
+    let release = at_ms(250) + hold;
     sim.release(LEFT, release);
     sim.run_until(release + Duration::from_secs(1));
 
     let injected = injected(&sim);
     // Every cycle ran: none was skipped for a late echo.
+    let fewest = (hold.as_secs_f64() / t_slow.as_secs_f64()) as usize - 1;
     assert!(
-        injected.len() as u32 >= 2 * (clicks - 1),
-        "{} injections",
+        injected.len() >= 2 * fewest,
+        "{} injections at {cps} CPS",
         injected.len()
     );
     let tolerance = Duration::from_nanos(2);
+    let lo = t_fast.mul_f64(1.0 - jitter / 2.0) - t_slow.mul_f64(jitter / 2.0);
+    let hi = t_slow.mul_f64(1.0 + jitter);
     let mut prev_down = at_ms(250);
-    let mut intervals = Vec::new();
     for pair in injected.as_chunks::<2>().0 {
         let [(up, Direction::Up), (down, Direction::Down)] = *pair else {
             panic!("injections out of order: {pair:?}");
         };
         let interval = down - prev_down;
         let up_time = down - up;
-        let lo = t.mul_f64(1.0 - jitter);
-        let hi = t.mul_f64(1.0 + jitter);
         assert!(
             interval + tolerance >= lo && interval <= hi + tolerance,
-            "interval {interval:?} outside {lo:?}..={hi:?}"
+            "{cps} CPS: interval {interval:?} outside {lo:?}..={hi:?}"
         );
         let share_lo = interval.mul_f64(0.4 - 0.2 * jitter).max(MIN_PHASE);
         let share_hi = interval.mul_f64(0.4 + 0.2 * jitter);
@@ -89,23 +103,40 @@ fn check_jitter(cps: u32, seed: u64, clicks: u32) {
         );
         assert!(up_time >= MIN_PHASE, "up-time {up_time:?} under the floor");
         assert!(interval - up_time >= MIN_PHASE, "down-hold under the floor");
-        intervals.push(interval);
         prev_down = down;
-    }
-    for window in intervals.windows(25) {
-        let mean = window.iter().sum::<Duration>() / 25;
-        let error = mean.abs_diff(t);
-        assert!(
-            error <= t.mul_f64(0.02) + tolerance,
-            "25-interval mean {mean:?} is more than 2% from {t:?}"
-        );
     }
 }
 
 #[test]
-fn jitter_keeps_intervals_up_times_and_the_mean_in_bounds() {
-    for cps in [1, 10, 50] {
-        check_jitter(cps, 7, 3_000);
+fn jitter_keeps_intervals_and_up_times_in_the_bands_envelope() {
+    for cps in [1, 10, 15, 50] {
+        let hold = Duration::from_secs(1) / cps * 3_000;
+        check_jitter(cps, 7, hold);
+    }
+}
+
+#[test]
+fn jitter_drifts_the_rate_during_a_hold() {
+    for seed in 1..=10 {
+        let mut sim = Sim::with_seed(settings(15, 250, true), seed);
+        sim.control_at(Time::ZERO, Input::SetEnabled(true));
+        sim.press(LEFT, at_ms(0));
+        sim.release(LEFT, at_ms(250 + 60_000));
+        sim.run_until(at_ms(62_000));
+        let downs = downs(&sim);
+        let counts: Vec<usize> = (0..60u64)
+            .map(|w| {
+                let from = at_ms(250 + 1_000 * w);
+                let to = from + Duration::from_secs(1);
+                downs.iter().filter(|&&d| from <= d && d < to).count()
+            })
+            .collect();
+        let (min, max) = (counts.iter().min().unwrap(), counts.iter().max().unwrap());
+        assert!(
+            (12..=18).contains(min) && (12..=18).contains(max),
+            "seed {seed}: {counts:?}"
+        );
+        assert!(max - min >= 2, "seed {seed}: {counts:?}");
     }
 }
 

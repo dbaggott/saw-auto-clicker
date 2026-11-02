@@ -6,7 +6,7 @@ use fastrand::Rng;
 use crate::backend::{Inject, Observe};
 use crate::clock::{Clock, Time};
 use crate::gate::{Button, ButtonEvent, Direction, Source};
-use crate::jitter::{Cycle, Grid, HUMAN_JITTER, MIN_PHASE};
+use crate::jitter::{Cycle, Grid, HUMAN_JITTER, MIN_PHASE, RATE_SPREAD};
 use crate::settings::Settings;
 
 /// The floor on how long an injection may go unechoed before the observation
@@ -84,8 +84,12 @@ struct InFlight {
 impl Burst {
     fn new(start: Time, settings: &Settings, rng: Rng) -> Burst {
         let interval = settings.interval();
-        let jitter = if settings.jitter() { HUMAN_JITTER } else { 0.0 };
-        let mut grid = Grid::new(start, interval, jitter, rng);
+        let (jitter, spread) = if settings.jitter() {
+            (HUMAN_JITTER, RATE_SPREAD)
+        } else {
+            (0.0, 0.0)
+        };
+        let mut grid = Grid::new(start, settings.cps(), jitter, spread, rng);
         let cycle = grid.next_cycle();
         Burst {
             grid,
