@@ -30,7 +30,14 @@ saw-auto-clicker can't click into a window running as administrator, such as Tas
 
 `mise trust && mise install` installs the Rust toolchain pinned in `rust-toolchain.toml`, with its components and Windows targets; `mise.toml` points mise at that file rather than repeating the version. Without mise, `rustup toolchain install` does the same, and is what CI runs.
 
-The workspace builds on any host. Windows-only code sits behind `cfg(windows)`, so on macOS or Linux `cargo clippy --workspace --all-targets` checks everything and `cargo test -p saw-core` runs the core's tests.
+The workspace builds on any host. Windows-only code sits behind `cfg(windows)`, so on macOS or Linux `cargo clippy --workspace --all-targets` checks everything outside `cfg(windows)` and `cargo test -p saw-core` runs the core's tests.
+
+To lint the Windows code from macOS or Linux, add `--target x86_64-pc-windows-msvc`. `crates/app/build.rs` then compiles the icon and version resource with `llvm-rc`, or with whatever `RC_PATH` names. Clippy never links, so without `llvm-rc` a stub that creates the file named by its `/fo<path>` argument is enough:
+
+```sh
+printf '#!/bin/sh\nfor a; do case $a in /fo*) touch "${a#/fo}";; esac; done\n' > /tmp/rc-stub && chmod +x /tmp/rc-stub
+RC_PATH=/tmp/rc-stub cargo clippy --workspace --all-targets --target x86_64-pc-windows-msvc
+```
 
 Releases are cut by bumping `version` in the workspace `Cargo.toml` and adding a `## v<version>` section to `CHANGELOG.md`, which becomes the release notes, then running `cargo check` so `Cargo.lock` records the new version too; CI builds with `--locked` and fails on a stale lock file. When a push to main carries a version that has no release yet, CI tests and builds it as usual, installs and uninstalls the installer on x64 and Arm64, checks that the installed app reports the new version, and publishes a GitHub release tagged `v<version>` at that commit with the installer attached (`.github/workflows/release.yml`). A version with a hyphen, such as `1.0.0-rc.1`, publishes a pre-release. The download page links to the latest release, which GitHub never resolves to a pre-release.
 
