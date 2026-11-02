@@ -6,9 +6,8 @@ use std::time::Duration;
 use super::sim::*;
 use crate::clock::Time;
 use crate::gate::{Button, Direction};
-use crate::jitter::{HUMAN_JITTER, MIN_PHASE, RATE_SPREAD};
+use crate::jitter::{HUMAN_JITTER, MIN_PHASE, interval_band};
 use crate::scheduler::Input;
-use crate::settings::CPS_RANGE;
 
 const LEFT: Button = Button::Left;
 
@@ -48,24 +47,13 @@ fn without_jitter_downs_are_exactly_one_interval_apart() {
     }
 }
 
-/// The band's fastest and slowest nominal intervals at `cps` (D5).
-fn band(cps: u32) -> (Duration, Duration) {
-    let cps = f64::from(cps);
-    let fastest = (cps * (1.0 + RATE_SPREAD)).min(f64::from(*CPS_RANGE.end()));
-    let slowest = cps * (1.0 - RATE_SPREAD);
-    (
-        Duration::from_secs_f64(1.0 / fastest),
-        Duration::from_secs_f64(1.0 / slowest),
-    )
-}
-
 /// Holds for `hold` and checks, on every click, what the injections can show
 /// of D5: each interval within the envelope the band allows, and the up-time
 /// share and floors. The nominal grid itself is checked in `jitter`'s tests.
 fn check_jitter(cps: u32, seed: u64, hold: Duration) {
     let jitter = HUMAN_JITTER;
     let s = settings(cps, 250, true);
-    let (t_fast, t_slow) = band(cps);
+    let (t_fast, t_slow) = interval_band(cps);
     let mut sim = Sim::with_seed(s, seed);
     sim.control_at(Time::ZERO, Input::SetEnabled(true));
     sim.press(LEFT, at_ms(0));

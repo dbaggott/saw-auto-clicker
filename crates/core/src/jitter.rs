@@ -97,10 +97,27 @@ impl Grid {
     }
 }
 
+/// The slowest and fastest rates, in clicks per second, D5's drift draws from
+/// at `cps`: `cps · (1 ± spread)`, its top clamped to the top of [`CPS_RANGE`].
+fn rate_band(cps: u32, spread: f64) -> (f64, f64) {
+    let cps = f64::from(cps);
+    let fastest = (cps * (1.0 + spread)).min(f64::from(*CPS_RANGE.end()));
+    (cps * (1.0 - spread), fastest)
+}
+
+/// The fastest and slowest nominal intervals Jitter's drift allows at `cps`.
+#[cfg(test)]
+pub(crate) fn interval_band(cps: u32) -> (Duration, Duration) {
+    let (slowest, fastest) = rate_band(cps, RATE_SPREAD);
+    (
+        Duration::from_secs_f64(1.0 / fastest),
+        Duration::from_secs_f64(1.0 / slowest),
+    )
+}
+
 /// D5's drifting rate: piecewise linear in nominal time, ramping across each
 /// [`RATE_SEGMENT`] from one target to the next, with every target drawn
-/// uniformly from the band `cps · (1 ± spread)`, its top clamped to the top of
-/// [`CPS_RANGE`]. The rate starts at a draw, not at the CPS.
+/// uniformly from [`rate_band`]. The rate starts at a draw, not at the CPS.
 struct Drift {
     slowest: f64,
     fastest: f64,
@@ -111,9 +128,7 @@ struct Drift {
 
 impl Drift {
     fn new(start: Time, cps: u32, spread: f64, rng: &mut Rng) -> Drift {
-        let cps = f64::from(cps);
-        let slowest = cps * (1.0 - spread);
-        let fastest = (cps * (1.0 + spread)).min(f64::from(*CPS_RANGE.end()));
+        let (slowest, fastest) = rate_band(cps, spread);
         let mut drift = Drift {
             slowest,
             fastest,
@@ -148,23 +163,13 @@ impl Drift {
 mod tests {
     use super::*;
 
-    /// The band's (fastest, slowest) nominal intervals at `cps`.
-    fn band(cps: u32) -> (Duration, Duration) {
-        let fastest = (f64::from(cps) * (1.0 + RATE_SPREAD)).min(f64::from(*CPS_RANGE.end()));
-        let slowest = f64::from(cps) * (1.0 - RATE_SPREAD);
-        (
-            Duration::from_secs_f64(1.0 / fastest),
-            Duration::from_secs_f64(1.0 / slowest),
-        )
-    }
-
     /// Draws `clicks` clicks and checks D5's per-click bounds and R7's mean on
     /// the moving grid.
     fn check_grid(cps: u32, seed: u64, clicks: usize) {
         let jitter = HUMAN_JITTER;
         let start = Time::from_epoch(Duration::from_millis(250));
         let mut grid = Grid::new(start, cps, jitter, RATE_SPREAD, Rng::with_seed(seed));
-        let (t_fast, t_slow) = band(cps);
+        let (t_fast, t_slow) = interval_band(cps);
         let tolerance = Duration::from_nanos(2);
         let mut prev_nominal = start;
         let mut prev_down = start;
