@@ -30,7 +30,7 @@ saw-auto-clicker can't click into a window running as administrator, such as Tas
 
 `mise trust && mise install` installs the Rust toolchain pinned in `rust-toolchain.toml`, with its components and Windows targets; `mise.toml` points mise at that file rather than repeating the version. Without mise, `rustup toolchain install` does the same, and is what CI runs.
 
-The workspace builds on any host. Windows-only code sits behind `cfg(windows)`, so on macOS or Linux `cargo clippy --workspace --all-targets` checks everything and `cargo test -p saw-core` runs the core's tests.
+The workspace builds on any host. Windows-only code sits behind `cfg(windows)`, so on macOS or Linux `cargo clippy --workspace --all-targets` checks everything outside `cfg(windows)` and `cargo test -p saw-core` runs the core's tests.
 
 To lint the Windows code from macOS or Linux, add `--target x86_64-pc-windows-msvc`. `crates/app/build.rs` then compiles the icon and version resource with `llvm-rc`, or with whatever `RC_PATH` names. Clippy never links, so without `llvm-rc` a stub that creates the file named by its `/fo<path>` argument is enough:
 
