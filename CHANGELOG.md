@@ -2,6 +2,11 @@
 
 Each release's notes are its section here. CI fails when the workspace version in `Cargo.toml` has no section, so bumping the version means writing one.
 
+## v1.0.0
+
+- The butterfly button now sets 15 clicks per second, up from 12. A saved 12 with Jitter on no longer shows as butterfly clicking.
+- Jitter now also varies the click rate during a hold, drifting up to 2 clicks per second either side of the set rate at 15, proportionally at other rates, and never above 50, as a person's clicking speeds up and slows down.
+
 ## v0.6.1
 
 - Reworded the explanations for the Clicks and Enable on startup settings and the butterfly button.
