@@ -47,8 +47,7 @@ const ALLOWED_HELP: &str = "To prevent unintended auto-clicking, the auto-clicke
 in allowed applications. In order to add an application, it must be running.";
 const NO_APPS_NOTICE: &str = "Configure your first allowed application above (currently \
 auto-clicking is not allowed for any application).";
-const ENABLED_HELP: &str = "Turns auto-clicking on or off, as the tray menu and the toggle \
-hotkey do.";
+const ENABLED_HELP: &str = "Turns auto-clicking on or off for all allowed applications.";
 /// The tallest the list of apps grows before it scrolls, so a long list
 /// never pushes the window off the screen. Four and a half rows, so a cut-off
 /// row shows there is more.
@@ -73,7 +72,7 @@ pub struct Closed {
 /// itself once it has drawn that many frames, for the self-test.
 pub fn show(app: &mut App, close_after_frames: Option<u32>) -> Result<Closed, String> {
     let viewport = egui::ViewportBuilder::default()
-        .with_title("saw-auto-clicker settings")
+        .with_title("SAW Auto-Clicker settings")
         .with_inner_size([WIDTH, 360.0])
         .with_resizable(false)
         .with_minimize_button(false)

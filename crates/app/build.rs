@@ -8,8 +8,8 @@ fn main() {
     let mut resource = winresource::WindowsResource::new();
     resource
         .set_icon("assets/saw-auto-clicker.ico")
-        .set("ProductName", "saw-auto-clicker")
-        .set("FileDescription", "saw-auto-clicker");
+        .set("ProductName", "SAW Auto-Clicker")
+        .set("FileDescription", "SAW Auto-Clicker");
     resource
         .compile()
         .expect("the icon and version information compile into a resource");

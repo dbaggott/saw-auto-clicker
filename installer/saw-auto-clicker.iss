@@ -20,7 +20,11 @@
 ; emulation; it gets the arm64 build instead.
 #define Architectures "x64os arm64"
 
-#define AppName "saw-auto-clicker"
+; The name the installer, Settings > Apps and the Start menu show.
+#define AppName "SAW Auto-Clicker"
+; The install folder's and Start-menu shortcut's names, which keep the
+; earlier name so an upgrade lands in place and replaces its own shortcut.
+#define AppDirName "saw-auto-clicker"
 ; A stable name, so an upgrade replaces the exe in place and the start-at-login
 ; value keeps pointing at it.
 #define AppExeName "saw-auto-clicker.exe"
@@ -39,7 +43,7 @@ AppVerName={#AppName} {#AppVersion}
 AppPublisherURL=https://github.com/dbaggott/saw-auto-clicker
 ; The app never needs administrator rights, so neither does installing it.
 PrivilegesRequired=lowest
-DefaultDirName={autopf}\{#AppName}
+DefaultDirName={autopf}\{#AppDirName}
 DisableProgramGroupPage=yes
 ; Start at login stays unticked on an upgrade too, so reinstalling never turns
 ; back on what the user turned off in the tray menu.
@@ -70,7 +74,7 @@ Source: "{#AppExeX64}"; DestDir: "{app}"; DestName: "{#AppExeName}"; Check: not 
 Source: "{#AppExeArm64}"; DestDir: "{app}"; DestName: "{#AppExeName}"; Check: IsArm64; Flags: ignoreversion
 
 [Icons]
-Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"
+Name: "{autoprograms}\{#AppDirName}"; Filename: "{app}\{#AppExeName}"
 
 [Registry]
 ; The same string the app writes (crates/app/src/win/autostart.rs), so its tray

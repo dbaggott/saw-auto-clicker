@@ -5,7 +5,7 @@ use saw_core::{Button, ButtonEvent, Direction, Hotkey, Settings, Source, Verdict
 /// R16's message.
 pub const ELEVATED_MESSAGE: &str = "Clicking is unavailable over elevated (administrator) windows.";
 const HOTKEY_MISSING_MESSAGE: &str = "No hotkey is active; see Settings.";
-const NO_APPS_MESSAGE: &str = "Configure allowed applications in settings";
+const NO_APPS_MESSAGE: &str = "Configure allowed applications in settings.";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TrayState {
@@ -29,7 +29,7 @@ pub fn hotkey_missing(settings: &Settings, active: Option<Hotkey>) -> bool {
 impl TrayState {
     pub fn tooltip(&self) -> String {
         let state = if self.enabled { "enabled" } else { "disabled" };
-        let mut text = format!("saw-auto-clicker: {state}");
+        let mut text = format!("SAW Auto-Clicker: {state}");
         // With no apps chosen nothing clicks, elevated or not, and leaving
         // R16's message out keeps the tooltip within the tray's limit.
         for (shown, message) in [
@@ -53,7 +53,7 @@ impl TrayState {
 
 /// The notification shown when the app starts enabled, for a user who forgot
 /// it starts that way (R14). It shows only then, so it always says enabled.
-pub const STARTED_ENABLED_NOTICE: &str = "SAW Auto-Clicker is running (currently enabled).";
+pub const STARTED_ENABLED_NOTICE: &str = "SAW Auto-Clicker is running and is enabled.";
 
 /// Spots, from the events the gate sees, the moment a burst starts: the
 /// first of the app's own injections to pass after a physical press. That
@@ -102,18 +102,18 @@ mod tests {
     #[test]
     fn the_tooltip_names_the_state_and_r16s_message_while_it_applies() {
         let mut state = TrayState::default();
-        assert_eq!(state.tooltip(), "saw-auto-clicker: disabled");
+        assert_eq!(state.tooltip(), "SAW Auto-Clicker: disabled");
         state.enabled = true;
-        assert_eq!(state.tooltip(), "saw-auto-clicker: enabled");
+        assert_eq!(state.tooltip(), "SAW Auto-Clicker: enabled");
         state.elevated_warning = true;
         assert_eq!(
             state.tooltip(),
-            format!("saw-auto-clicker: enabled\n{ELEVATED_MESSAGE}")
+            format!("SAW Auto-Clicker: enabled\n{ELEVATED_MESSAGE}")
         );
         state.hotkey_missing = true;
         assert_eq!(
             state.tooltip(),
-            format!("saw-auto-clicker: enabled\n{ELEVATED_MESSAGE}\n{HOTKEY_MISSING_MESSAGE}")
+            format!("SAW Auto-Clicker: enabled\n{ELEVATED_MESSAGE}\n{HOTKEY_MISSING_MESSAGE}")
         );
     }
 
@@ -127,7 +127,7 @@ mod tests {
         };
         assert_eq!(
             state.tooltip(),
-            format!("saw-auto-clicker: enabled\n{NO_APPS_MESSAGE}\n{HOTKEY_MISSING_MESSAGE}")
+            format!("SAW Auto-Clicker: enabled\n{NO_APPS_MESSAGE}\n{HOTKEY_MISSING_MESSAGE}")
         );
     }
 

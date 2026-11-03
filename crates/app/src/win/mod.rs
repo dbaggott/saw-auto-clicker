@@ -57,7 +57,7 @@ fn run(launch: Launch) -> ExitCode {
         Ok(None) => {
             if launch == Launch::ByHand && ask_running_instance_to_show_settings().is_err() {
                 show_info(
-                    "saw-auto-clicker is already running. Its saw-blade icon is in the \
+                    "SAW Auto-Clicker is already running. Its saw-blade icon is in the \
                      system tray, by the clock.",
                 );
             }
