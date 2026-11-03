@@ -2,7 +2,7 @@
 //! default, loaded at startup and written on the first run and whenever the
 //! settings window applies a change.
 
-use saw_core::{CPS_RANGE, ClickButtons, Settings};
+use saw_core::{Apps, CPS_RANGE, ClickButtons, Settings};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
@@ -38,6 +38,8 @@ struct FileIn {
     /// What versions before 0.5.0 wrote for `enable_on_startup`, read when it
     /// is absent.
     arm_on_startup: Option<toml::Value>,
+    /// Absent in files from versions before 2.0.0, which read as no apps.
+    apps: Option<toml::Value>,
 }
 
 /// The file as written.
@@ -50,6 +52,7 @@ struct FileOut {
     /// Empty for no hotkey.
     hotkey: String,
     enable_on_startup: bool,
+    apps: Vec<String>,
 }
 
 fn button_name(buttons: ClickButtons) -> &'static str {
@@ -182,22 +185,38 @@ fn from_file(file: FileIn) -> Loaded {
         (value, _) => ("enable_on_startup", value),
     };
     let enable_on_startup = pick(&mut problems, name, value.map(|v| boolean(&v)), false);
+    let mut left_out = Vec::new();
+    let apps = pick(
+        &mut problems,
+        "apps",
+        file.apps.map(|v| apps(&v, &mut left_out)),
+        defaults.apps,
+    );
     let draft = Draft {
         cps,
         delay_ms,
         jitter,
         buttons,
         hotkey,
+        apps,
     };
     let settings = draft
-        .to_settings()
+        .into_settings()
         .expect("each value was checked against its range");
-    let problem = (!problems.is_empty()).then(|| {
-        format!(
+    let mut sentences = Vec::new();
+    if !problems.is_empty() {
+        sentences.push(format!(
             "in the settings file, {}; using the default for each",
             problems.join(", ")
-        )
-    });
+        ));
+    }
+    if !left_out.is_empty() {
+        sentences.push(format!(
+            "in the settings file's apps, {}; leaving those out",
+            left_out.join(", ")
+        ));
+    }
+    let problem = (!sentences.is_empty()).then(|| sentences.join(". "));
     Loaded {
         settings,
         enable_on_startup,
@@ -215,6 +234,25 @@ fn whole_in(value: &toml::Value, range: std::ops::RangeInclusive<u32>) -> Result
         .ok()
         .filter(|n| range.contains(n))
         .ok_or_else(|| format!("must be {}–{}, got {n}", range.start(), range.end()))
+}
+
+/// An array of file names. An entry that isn't one is left out, noting why
+/// in `left_out`, and the others stand.
+fn apps(value: &toml::Value, left_out: &mut Vec<String>) -> Result<Apps, String> {
+    let entries = value
+        .as_array()
+        .ok_or_else(|| format!("must be a list such as [\"app.exe\"], got {value}"))?;
+    let mut apps = Apps::default();
+    for entry in entries {
+        let added = match entry.as_str() {
+            Some(name) => apps.add(name).map_err(|e| e.to_string()),
+            None => Err(format!("an entry must be text, got {entry}")),
+        };
+        if let Err(why) = added {
+            left_out.push(why);
+        }
+    }
+    Ok(apps)
 }
 
 fn boolean(value: &toml::Value) -> Result<bool, String> {
@@ -255,6 +293,7 @@ pub fn save(path: &Path, settings: &Settings, enable_on_startup: bool) -> io::Re
             .hotkey
             .map_or_else(String::new, |h| HotkeyText(h).to_string()),
         enable_on_startup,
+        apps: draft.apps.names().to_vec(),
     };
     let text = toml::to_string(&file).map_err(io::Error::other)?;
     if let Some(dir) = path.parent() {
@@ -269,7 +308,7 @@ pub fn save(path: &Path, settings: &Settings, enable_on_startup: bool) -> io::Re
 mod tests {
     use std::time::Duration;
 
-    use saw_core::{ClickButtons, Hotkey, Key, Modifiers};
+    use saw_core::{Apps, ClickButtons, Hotkey, Key, Modifiers};
 
     use super::*;
 
@@ -318,6 +357,15 @@ mod tests {
             Some(hotkey),
         )
         .unwrap()
+        .with_apps(apps(&["Game.exe", "éditeur.exe"]))
+    }
+
+    fn apps(names: &[&str]) -> Apps {
+        let mut apps = Apps::default();
+        for name in names {
+            apps.add(name).unwrap();
+        }
+        apps
     }
 
     #[test]
@@ -476,6 +524,7 @@ mod tests {
             "buttons = \"right\"",
             "hotkey = \"Shift+Win+K\"",
             "enable_on_startup = true",
+            "apps = [\"Game.exe\", \"éditeur.exe\"]",
         ] {
             assert!(text.contains(line), "{line:?} missing from:\n{text}");
         }
@@ -583,5 +632,45 @@ mod tests {
             (loaded.settings.cps(), loaded.settings.activation_delay()),
             (50, Duration::from_millis(50))
         );
+    }
+
+    #[test]
+    fn a_file_without_apps_loads_with_none_quietly() {
+        let dir = TempDir::new("apps-missing");
+        write(&dir.file(), "cps = 20\n");
+        let loaded = load(&dir.file());
+        assert!(loaded.settings.apps().is_empty());
+        assert_eq!(loaded.problem, None);
+    }
+
+    #[test]
+    fn apps_that_are_not_a_list_load_as_none_with_a_reason() {
+        let dir = TempDir::new("apps-not-a-list");
+        write(&dir.file(), "cps = 20\napps = \"app.exe\"\n");
+        let loaded = load(&dir.file());
+        assert!(loaded.settings.apps().is_empty());
+        assert_eq!(loaded.settings.cps(), 20);
+        let problem = loaded.problem.unwrap();
+        assert!(problem.contains("apps must be a list"), "{problem:?}");
+    }
+
+    #[test]
+    fn a_bad_app_entry_is_left_out_alone_with_a_reason() {
+        let dir = TempDir::new("apps-bad-entry");
+        write(
+            &dir.file(),
+            "cps = 99\napps = [\"a.exe\", 3, \"\", \"C:\\\\Games\\\\b.exe\", \"A.EXE\", \"b.exe\"]\n",
+        );
+        let loaded = load(&dir.file());
+        assert_eq!(loaded.settings.apps(), &apps(&["a.exe", "b.exe"]));
+        let problem = loaded.problem.unwrap();
+        for part in [
+            "cps must be 1–50",
+            "an entry must be text, got 3",
+            "can't be empty",
+            "C:\\Games\\b.exe",
+        ] {
+            assert!(problem.contains(part), "{part:?} not in {problem:?}");
+        }
     }
 }

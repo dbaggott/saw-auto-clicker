@@ -18,7 +18,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 use crate::apply::apply;
 use crate::config;
-use crate::status::{BurstWatch, TrayState, hotkey_missing};
+use crate::status::{BurstWatch, STARTED_ENABLED_NOTICE, TrayState, hotkey_missing};
+use crate::tray_guid;
 use crate::win::autostart::StartAtLogin;
 use crate::win::fly_to_tray;
 use crate::win::instance::{listen_for_show_settings, show_error};
@@ -142,8 +143,12 @@ impl App {
             enabled: false,
             elevated_warning: false,
             hotkey_missing: hotkey_missing(&applied.settings, applied.active_hotkey),
+            no_apps: applied.settings.apps().is_empty(),
         };
-        let tray = match Tray::new(tray_state, start_at_login_checked(&start_at_login)) {
+        let guid = std::env::current_exe()
+            .ok()
+            .map(|exe| tray_guid::for_exe(&exe));
+        let tray = match Tray::new(tray_state, start_at_login_checked(&start_at_login), guid) {
             Ok(tray) => tray,
             Err(e) => {
                 // Still disabled, so nothing is held up; stop in quit's order.
@@ -169,10 +174,16 @@ impl App {
             clicker: Some(clicker),
         };
         if loaded.first_run {
+            // Safe to enable by default now that only allowed applications
+            // auto-click (R21).
+            app.enable_on_startup = true;
             app.save();
         }
         if loaded.first_run || loaded.enable_on_startup || persist == Persist::No {
             app.clicker().controller().set_enabled(true);
+            // A notification Windows refuses costs only the reminder, and
+            // there is no log to record it in.
+            let _ = app.tray.notify(STARTED_ENABLED_NOTICE);
         }
         Ok(app)
     }
@@ -183,6 +194,12 @@ impl App {
 
     pub fn enabled(&self) -> bool {
         self.tray_state.enabled
+    }
+
+    /// Enables or disables, as the tray menu and the hotkey do; the state
+    /// shown changes when the clicker reports it.
+    pub fn set_enabled(&self, enabled: bool) {
+        self.clicker().controller().set_enabled(enabled);
     }
 
     /// The main thread's loop: tray clicks, the clicker's reports, and the
@@ -293,6 +310,7 @@ impl App {
         self.hotkey_problem = applied.hotkey_problem;
         self.enable_on_startup = enable_on_startup;
         self.tray_state.hotkey_missing = hotkey_missing(&self.settings, self.active_hotkey);
+        self.tray_state.no_apps = self.settings.apps().is_empty();
         self.tray.show(self.tray_state);
         self.save();
     }

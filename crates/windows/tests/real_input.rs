@@ -10,8 +10,8 @@ use std::thread;
 use std::time::Duration;
 
 use saw_core::{
-    Button, ButtonEvent, ClickButtons, Direction, Hotkey, HotkeyError, Inject, Key, Modifiers,
-    Observe, RegisterHotkey, Settings, Source, StdClock, Verdict,
+    Apps, Button, ButtonEvent, ClickButtons, Direction, Hotkey, HotkeyError, Inject, Key,
+    Modifiers, Observe, RegisterHotkey, Settings, Source, StdClock, Target, Verdict,
 };
 use saw_windows::{Clicker, HotkeyThread, ThrottlingOptOuts};
 use windows::Win32::Foundation::{LPARAM, WPARAM};
@@ -43,8 +43,9 @@ fn send_untagged(flags: MOUSE_EVENT_FLAGS) {
     assert_eq!(sent, 1, "SendInput: {}", std::io::Error::last_os_error());
 }
 
-/// A topmost window of this process under the cursor, so the elevated-target
-/// check sees a target it can read and the clicks land somewhere harmless.
+/// A topmost window of this process under the cursor, so the target check
+/// sees a target it can read, the test's own executable, and the clicks land
+/// somewhere harmless.
 struct TargetWindow {
     thread_id: u32,
     thread: Option<thread::JoinHandle<()>>,
@@ -102,6 +103,10 @@ fn a_held_button_auto_clicks_through_the_real_hook() {
     let _target = TargetWindow::under_cursor();
     let observed = Arc::new(Mutex::new(Vec::<(ButtonEvent, Verdict)>::new()));
     let log = Arc::clone(&observed);
+    let exe = std::env::current_exe().unwrap();
+    let mut apps = Apps::default();
+    apps.add(exe.file_name().unwrap().to_str().unwrap())
+        .unwrap();
     let settings = Settings::new(
         20,
         Duration::from_millis(100),
@@ -109,7 +114,8 @@ fn a_held_button_auto_clicks_through_the_real_hook() {
         ClickButtons::Both,
         None,
     )
-    .unwrap();
+    .unwrap()
+    .with_apps(apps);
     let clicker = Clicker::start(
         settings,
         ThrottlingOptOuts::default(),
@@ -169,8 +175,11 @@ impl Observe for Inert {
 impl Inject for Inert {
     fn inject(&mut self, _: Button, _: Direction) {}
 
-    fn can_inject_at_cursor(&mut self) -> bool {
-        false
+    fn target_at_cursor(&mut self) -> Target {
+        Target {
+            injectable: false,
+            app: None,
+        }
     }
 }
 

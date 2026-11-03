@@ -20,7 +20,11 @@
 ; emulation; it gets the arm64 build instead.
 #define Architectures "x64os arm64"
 
-#define AppName "saw-auto-clicker"
+; The name the installer, Settings > Apps and the Start menu show.
+#define AppName "SAW Auto-Clicker"
+; The install folder's name, which keeps the earlier name so an upgrade
+; lands in place.
+#define AppDirName "saw-auto-clicker"
 ; A stable name, so an upgrade replaces the exe in place and the start-at-login
 ; value keeps pointing at it.
 #define AppExeName "saw-auto-clicker.exe"
@@ -39,7 +43,7 @@ AppVerName={#AppName} {#AppVersion}
 AppPublisherURL=https://github.com/dbaggott/saw-auto-clicker
 ; The app never needs administrator rights, so neither does installing it.
 PrivilegesRequired=lowest
-DefaultDirName={autopf}\{#AppName}
+DefaultDirName={autopf}\{#AppDirName}
 DisableProgramGroupPage=yes
 ; Start at login stays unticked on an upgrade too, so reinstalling never turns
 ; back on what the user turned off in the tray menu.
@@ -68,6 +72,11 @@ Name: startatlogin; Description: "Start at login"; Flags: unchecked
 ; Only x64os and arm64 are allowed, so a machine that is not Arm64 is x64.
 Source: "{#AppExeX64}"; DestDir: "{app}"; DestName: "{#AppExeName}"; Check: not IsArm64; Flags: ignoreversion
 Source: "{#AppExeArm64}"; DestDir: "{app}"; DestName: "{#AppExeName}"; Check: IsArm64; Flags: ignoreversion
+
+[InstallDelete]
+; The shortcut versions before 2.0.0 created, named before the app took its
+; display name, so an upgrade leaves one shortcut, not two.
+Type: files; Name: "{autoprograms}\saw-auto-clicker.lnk"
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"

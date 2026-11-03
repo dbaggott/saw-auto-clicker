@@ -5,7 +5,7 @@ use std::ops::RangeInclusive;
 use std::time::Duration;
 
 use saw_core::{
-    ACTIVATION_DELAY_RANGE, BUTTERFLY_CPS, ClickButtons, Hotkey, Settings, SettingsError,
+    ACTIVATION_DELAY_RANGE, Apps, BUTTERFLY_CPS, ClickButtons, Hotkey, Settings, SettingsError,
 };
 
 /// Q2's range in whole milliseconds.
@@ -14,13 +14,14 @@ pub fn delay_ms_range() -> RangeInclusive<u32> {
         ..=ACTIVATION_DELAY_RANGE.end().as_millis() as u32
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Draft {
     pub cps: u32,
     pub delay_ms: u32,
     pub jitter: bool,
     pub buttons: ClickButtons,
     pub hotkey: Option<Hotkey>,
+    pub apps: Apps,
 }
 
 impl From<&Settings> for Draft {
@@ -31,12 +32,13 @@ impl From<&Settings> for Draft {
             jitter: settings.jitter(),
             buttons: settings.buttons(),
             hotkey: settings.hotkey(),
+            apps: settings.apps().clone(),
         }
     }
 }
 
 impl Draft {
-    pub fn to_settings(self) -> Result<Settings, SettingsError> {
+    pub fn into_settings(self) -> Result<Settings, SettingsError> {
         Settings::new(
             self.cps,
             Duration::from_millis(u64::from(self.delay_ms)),
@@ -44,6 +46,7 @@ impl Draft {
             self.buttons,
             self.hotkey,
         )
+        .map(|settings| settings.with_apps(self.apps))
     }
 
     /// Whether the clicking matches the butterfly preset. Not stored: any
@@ -67,6 +70,8 @@ mod tests {
 
     #[test]
     fn a_draft_round_trips_through_settings() {
+        let mut apps = Apps::default();
+        apps.add("app.exe").unwrap();
         let draft = Draft {
             cps: 50,
             delay_ms: 2000,
@@ -79,10 +84,11 @@ mod tests {
                 },
                 key: Key::Digit7,
             }),
+            apps,
         };
-        assert_eq!(Draft::from(&draft.to_settings().unwrap()), draft);
+        assert_eq!(Draft::from(&draft.clone().into_settings().unwrap()), draft);
         assert_eq!(
-            Draft::from(&Settings::default()).to_settings(),
+            Draft::from(&Settings::default()).into_settings(),
             Ok(Settings::default())
         );
     }
@@ -96,7 +102,7 @@ mod tests {
     fn out_of_range_values_are_refused() {
         let mut draft = Draft::from(&Settings::default());
         draft.cps = 51;
-        assert_eq!(draft.to_settings(), Err(SettingsError::Cps(51)));
+        assert_eq!(draft.into_settings(), Err(SettingsError::Cps(51)));
     }
 
     #[test]

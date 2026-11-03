@@ -1,4 +1,4 @@
-//! The settings window (R1, R14, R15, Q8): an eframe window opened on demand
+//! The settings window (R1, R14, R15, R21, Q8): an eframe window opened on demand
 //! on the main thread. While it is open, eframe's event loop pumps the main
 //! thread's messages, so the tray keeps working; the window polls for tray
 //! clicks and the clicker's reports as the main loop does.
@@ -6,7 +6,9 @@
 use std::time::Duration;
 
 use eframe::egui;
-use saw_core::{BUTTERFLY_CPS, CPS_RANGE, ClickButtons, Hotkey, Key, Modifiers};
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+use saw_core::{Apps, BUTTERFLY_CPS, CPS_RANGE, ClickButtons, Hotkey, Key, Modifiers};
+use windows::Win32::Foundation::HWND;
 
 use crate::flight::ScreenRect;
 use crate::form::{self, Draft};
@@ -15,6 +17,7 @@ use crate::icon;
 use crate::status::hotkey_missing;
 use crate::win::app::{App, Next};
 use crate::win::butterfly;
+use crate::win::window_icon::WindowIcons;
 
 /// How often the open window checks for tray clicks and the clicker's
 /// reports.
@@ -40,8 +43,20 @@ const DELAY_HELP: &str =
 const JITTER_HELP: &str = "Adds natural variation to the click rate.";
 const CLICKS_HELP: &str = "Which types of clicks auto-click when held down.";
 const HOTKEY_HELP: &str = "An optional keyboard shortcut that enables and disables auto-clicking.";
-const ENABLE_ON_STARTUP_HELP: &str = "Controls whether the auto-clicker is enabled \
-when the app starts, by default it starts disabled to prevent accidental auto-clicking.";
+const ALLOWED_HELP: &str = "To prevent unintended auto-clicking, the auto-clicker only works \
+in allowed applications. In order to add an application, it must be running.";
+const NO_APPS_NOTICE: &str = "Configure your first allowed application above (currently \
+auto-clicking is not allowed for any application).";
+const ENABLED_HELP: &str = "Turns auto-clicking on or off for all allowed applications.";
+/// The tallest the list of apps grows before it scrolls, so a long list
+/// never pushes the window off the screen. Four and a half rows, so a cut-off
+/// row shows there is more.
+const APPS_LIST_HEIGHT: f32 = 146.0;
+/// How far below the list's top edge its first entry's text sits: its frame's
+/// stroke and each row's top margin.
+const LIST_ROW_TOP: f32 = 4.0;
+const ENABLE_ON_STARTUP_HELP: &str =
+    "Controls whether the auto-clicker is enabled when the app starts.";
 
 /// How the window closed.
 pub struct Closed {
@@ -57,13 +72,13 @@ pub struct Closed {
 /// itself once it has drawn that many frames, for the self-test.
 pub fn show(app: &mut App, close_after_frames: Option<u32>) -> Result<Closed, String> {
     let viewport = egui::ViewportBuilder::default()
-        .with_title("saw-auto-clicker settings")
+        .with_title("SAW Auto-Clicker settings")
         .with_inner_size([WIDTH, 360.0])
         .with_resizable(false)
         .with_minimize_button(false)
         .with_maximize_button(false)
         .with_icon(egui::IconData {
-            rgba: icon::rgba(true),
+            rgba: icon::rgba(app.enabled()),
             width: icon::SIZE,
             height: icon::SIZE,
         });
@@ -79,6 +94,9 @@ pub fn show(app: &mut App, close_after_frames: Option<u32>) -> Result<Closed, St
     };
     let draft = Draft::from(&app.settings);
     let enable_on_startup = app.enable_on_startup;
+    // Without them the title bar still shows the state; only the taskbar
+    // and Alt+Tab lose it.
+    let icons = WindowIcons::new().ok();
     let modifiers = draft.hotkey.map_or(
         // What a newly chosen key starts with.
         Modifiers {
@@ -95,13 +113,17 @@ pub fn show(app: &mut App, close_after_frames: Option<u32>) -> Result<Closed, St
             style(&cc.egui_ctx);
             Ok(Box::new(Window {
                 app,
+                saved: draft.clone(),
                 draft,
-                saved: draft,
                 hotkey_edited: None,
                 modifiers,
                 enable_on_startup,
                 hotkey_unusable: None,
                 flap_started: None,
+                icons: icons.as_ref(),
+                icon_shown: None,
+                requested_enabled: None,
+                running_apps: None,
                 closed: &mut closed,
                 requested_height: None,
                 frames: 0,
@@ -173,6 +195,14 @@ struct Window<'a> {
     /// it stays in effect.
     hotkey_unusable: Option<String>,
     flap_started: Option<f64>,
+    icons: Option<&'a WindowIcons>,
+    /// The enabled state the window's icon shows, once it has been set.
+    icon_shown: Option<bool>,
+    /// The state the window's switch asked for, shown until the clicker
+    /// reports it, so the switch doesn't flick back meanwhile.
+    requested_enabled: Option<bool>,
+    /// The apps the add control offers, read when it opens.
+    running_apps: Option<Vec<String>>,
     closed: &'a mut Closed,
     /// The height last asked of the window, so a size the OS won't grant is
     /// asked for once rather than every frame.
@@ -182,7 +212,7 @@ struct Window<'a> {
 }
 
 impl eframe::App for Window<'_> {
-    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         match self.app.handle_arrivals() {
             Next::Wait => {}
             Next::OpenSettings => ctx.send_viewport_cmd(egui::ViewportCommand::Focus),
@@ -190,6 +220,16 @@ impl eframe::App for Window<'_> {
                 self.closed.next = Next::Quit;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
+        }
+        let enabled = self.app.enabled();
+        if self.requested_enabled == Some(enabled) {
+            self.requested_enabled = None;
+        }
+        if self.icon_shown != Some(enabled)
+            && let (Some(icons), Some(window)) = (self.icons, hwnd(frame))
+        {
+            icons.show(window, enabled);
+            self.icon_shown = Some(enabled);
         }
         let scale = ctx.pixels_per_point();
         if let Some(rect) = ctx.input(|i| i.viewport().outer_rect) {
@@ -238,7 +278,7 @@ impl eframe::App for Window<'_> {
     /// back.
     fn on_exit(&mut self) {
         if self.draft != self.saved || self.enable_on_startup != self.app.enable_on_startup {
-            self.save(self.draft);
+            self.save(self.draft.clone());
         }
     }
 }
@@ -284,7 +324,30 @@ impl Window<'_> {
             ui.end_row();
         });
         ui.add_space(4.0);
+        card(ui, "Applications", |ui| {
+            // At the top of its cell, level with the list's first entry or
+            // the add control, rather than centred on a list that may be tall.
+            ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                if !d.apps.is_empty() {
+                    ui.add_space(LIST_ROW_TOP);
+                }
+                setting(ui, "Allowed for", ALLOWED_HELP);
+            });
+            ui.vertical(|ui| {
+                apps_list(ui, &mut d.apps);
+                add_app(ui, &mut d.apps, &mut self.running_apps);
+            });
+            ui.end_row();
+        });
+        ui.add_space(4.0);
         card(ui, "Enabling and disabling", |ui| {
+            setting(ui, "Enabled", ENABLED_HELP);
+            let mut on = self.requested_enabled.unwrap_or(self.app.enabled());
+            if toggle(ui, &mut on, "Enabled").changed() {
+                self.requested_enabled = Some(on);
+                self.app.set_enabled(on);
+            }
+            ui.end_row();
             setting(ui, "Toggle hotkey", HOTKEY_HELP);
             let before = d.hotkey;
             ui.horizontal(|ui| {
@@ -328,6 +391,9 @@ impl Window<'_> {
     fn notices(&mut self, ui: &mut egui::Ui) {
         let error = ui.visuals().error_fg_color;
         let warning = ui.visuals().warn_fg_color;
+        if self.draft.apps.is_empty() {
+            notice(ui, warning, NO_APPS_NOTICE);
+        }
         if let Some(problem) = &self.hotkey_unusable {
             notice(ui, error, problem);
         }
@@ -340,7 +406,7 @@ impl Window<'_> {
                 && ui.button("Try the hotkey again").clicked();
         }
         if retry {
-            self.save(self.saved);
+            self.save(self.saved.clone());
         }
         if let Some(problem) = &self.app.save_problem {
             notice(ui, error, problem);
@@ -354,7 +420,7 @@ impl Window<'_> {
     /// it is let go, not at every step of the drag, and a hotkey once its
     /// controls have settled.
     fn save_changes(&mut self, ctx: &egui::Context) {
-        let mut ready = self.draft;
+        let mut ready = self.draft.clone();
         if let Some(edited) = self.hotkey_edited {
             let waited = ctx.input(|i| i.time) - edited;
             if waited < HOTKEY_SETTLE {
@@ -398,11 +464,142 @@ impl Window<'_> {
                 self.app.settings.hotkey()
             }
         };
-        let requested = Draft { hotkey, ..draft }
-            .to_settings()
-            .expect("the controls keep every value in range");
+        let requested = Draft {
+            hotkey,
+            ..draft.clone()
+        }
+        .into_settings()
+        .expect("the controls keep every value in range");
         self.app.apply_settings(requested, self.enable_on_startup);
         self.saved = draft;
+    }
+}
+
+/// The allowed applications, one row each with a control that removes it,
+/// scrolling once there are more than fit.
+fn apps_list(ui: &mut egui::Ui, apps: &mut Apps) {
+    if apps.is_empty() {
+        return;
+    }
+    let mut removed = None;
+    egui::Frame::new()
+        .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
+        .corner_radius(6)
+        .show(ui, |ui| {
+            // The window fits its height to its content, which leaves a
+            // scroll area no room to grow into, so it is told its height.
+            egui::ScrollArea::vertical()
+                .min_scrolled_height(APPS_LIST_HEIGHT)
+                .max_height(APPS_LIST_HEIGHT)
+                .auto_shrink([false, true])
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    for (row, name) in apps.names().iter().enumerate() {
+                        let fill = if row % 2 == 1 {
+                            ui.visuals().faint_bg_color
+                        } else {
+                            egui::Color32::TRANSPARENT
+                        };
+                        egui::Frame::new()
+                            .fill(fill)
+                            .inner_margin(egui::Margin::symmetric(10, 3))
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label(name);
+                                    let layout = egui::Layout::right_to_left(egui::Align::Center);
+                                    ui.with_layout(layout, |ui| {
+                                        if trash_button(ui, name).clicked() {
+                                            removed = Some(name.clone());
+                                        }
+                                    });
+                                });
+                            });
+                    }
+                });
+        });
+    if let Some(name) = removed {
+        apps.remove(&name);
+    }
+}
+
+/// A trash can that removes `name`, red while hovered or focused.
+fn trash_button(ui: &mut egui::Ui, name: &str) -> egui::Response {
+    let size = 22.0;
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::Role::Button, true, format!("Remove {name}"))
+    });
+    let active = response.hovered() || response.has_focus();
+    let colour = if active {
+        ui.visuals().error_fg_color
+    } else {
+        ui.visuals().weak_text_color()
+    };
+    let painter = ui.painter();
+    if active {
+        painter.rect_filled(rect, 4.0, colour.gamma_multiply(0.12));
+    }
+    let stroke = egui::Stroke::new(1.4, colour);
+    let c = rect.center();
+    let p = |x: f32, y: f32| c + egui::vec2(x, y);
+    // Lid, with its handle.
+    painter.line_segment([p(-6.0, -4.5), p(6.0, -4.5)], stroke);
+    painter.line_segment([p(-2.0, -4.5), p(-2.0, -6.5)], stroke);
+    painter.line_segment([p(-2.0, -6.5), p(2.0, -6.5)], stroke);
+    painter.line_segment([p(2.0, -6.5), p(2.0, -4.5)], stroke);
+    // Can, narrowing to its base, with two ribs.
+    painter.add(egui::Shape::closed_line(
+        vec![p(-4.5, -3.0), p(4.5, -3.0), p(3.5, 6.5), p(-3.5, 6.5)],
+        stroke,
+    ));
+    painter.line_segment([p(-1.3, -0.8), p(-1.0, 4.3)], stroke);
+    painter.line_segment([p(1.3, -0.8), p(1.0, 4.3)], stroke);
+    response.on_hover_text(format!("Remove {name}"))
+}
+
+/// A control offering the apps with a window open now that aren't chosen
+/// yet. `running` holds them while it is open, read once as it opens.
+fn add_app(ui: &mut egui::Ui, apps: &mut Apps, running: &mut Option<Vec<String>>) {
+    let menu = ui.menu_button("Add app…", |ui| {
+        let offered: Vec<&String> = running
+            .get_or_insert_with(saw_windows::running_apps)
+            .iter()
+            .filter(|name| !apps.contains(name))
+            .collect();
+        if offered.is_empty() {
+            ui.label(egui::RichText::new("No other app has a window open.").weak());
+            return None;
+        }
+        let mut chosen = None;
+        egui::ScrollArea::vertical()
+            .min_scrolled_height(APPS_LIST_HEIGHT * 2.0)
+            .max_height(APPS_LIST_HEIGHT * 2.0)
+            .show(ui, |ui| {
+                for name in offered {
+                    if ui.button(name.as_str()).clicked() {
+                        chosen = Some(name.clone());
+                        ui.close();
+                    }
+                }
+            });
+        chosen
+    });
+    match menu.inner {
+        Some(Some(name)) => {
+            // Names read from Windows are file names, so always accepted.
+            let _ = apps.add(&name);
+        }
+        Some(None) => {}
+        None => *running = None,
+    }
+}
+
+/// The window's own handle, for what eframe can't do itself.
+fn hwnd(frame: &eframe::Frame) -> Option<HWND> {
+    match frame.window_handle().ok()?.as_raw() {
+        RawWindowHandle::Win32(handle) => Some(HWND(handle.hwnd.get() as *mut _)),
+        _ => None,
     }
 }
 

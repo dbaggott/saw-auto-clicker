@@ -89,7 +89,7 @@ fn message_box(text: &str, icon: MESSAGEBOX_STYLE) {
         MessageBoxW(
             None,
             &HSTRING::from(text),
-            w!("saw-auto-clicker"),
+            w!("SAW Auto-Clicker"),
             MB_OK | icon,
         );
     }

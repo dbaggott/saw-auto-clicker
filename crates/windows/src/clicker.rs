@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use saw_core::{
     Button, ButtonEvent, Controller, Direction, Inject, Observe, SchedulerHandle, Settings, Status,
-    Verdict,
+    Target, Verdict,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     INPUT, INPUT_0, INPUT_MOUSE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_RIGHTDOWN,
@@ -115,7 +115,7 @@ impl Inject for Backend {
         unsafe { SendInput(&[input], size_of::<INPUT>() as i32) };
     }
 
-    fn can_inject_at_cursor(&mut self) -> bool {
-        self.target.target_injectable()
+    fn target_at_cursor(&mut self) -> Target {
+        self.target.target()
     }
 }

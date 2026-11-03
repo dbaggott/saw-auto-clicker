@@ -1,10 +1,11 @@
-//! What the tray shows (R14, R16), worked out from the core's reports.
+//! What the tray shows (R14, R16, R21), worked out from the core's reports.
 
 use saw_core::{Button, ButtonEvent, Direction, Hotkey, Settings, Source, Verdict};
 
 /// R16's message.
-pub const ELEVATED_MESSAGE: &str = "Clicking is unavailable over elevated (administrator) windows.";
-const HOTKEY_MISSING_MESSAGE: &str = "No hotkey is active; see Settings.";
+pub const ELEVATED_MESSAGE: &str = "Can't click into administrator windows.";
+const HOTKEY_MISSING_MESSAGE: &str = "Configured hotkey could not be used due to conflict.";
+const NO_APPS_MESSAGE: &str = "Configure allowed applications in settings.";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TrayState {
@@ -15,6 +16,8 @@ pub struct TrayState {
     /// No toggle hotkey is registered, because the one in the settings was
     /// refused at startup (R15).
     pub hotkey_missing: bool,
+    /// No app is chosen to auto-click in, so none does (R21).
+    pub no_apps: bool,
 }
 
 /// Whether the settings name a hotkey that isn't registered, because it was
@@ -26,9 +29,12 @@ pub fn hotkey_missing(settings: &Settings, active: Option<Hotkey>) -> bool {
 impl TrayState {
     pub fn tooltip(&self) -> String {
         let state = if self.enabled { "enabled" } else { "disabled" };
-        let mut text = format!("saw-auto-clicker: {state}");
+        let mut text = format!("SAW Auto-Clicker: {state}");
+        // With no apps chosen nothing clicks, elevated or not, and leaving
+        // R16's message out keeps the tooltip within the tray's limit.
         for (shown, message) in [
-            (self.elevated_warning, ELEVATED_MESSAGE),
+            (self.no_apps, NO_APPS_MESSAGE),
+            (self.elevated_warning && !self.no_apps, ELEVATED_MESSAGE),
             (self.hotkey_missing, HOTKEY_MISSING_MESSAGE),
         ] {
             if shown {
@@ -44,6 +50,10 @@ impl TrayState {
         if self.enabled { "Disable" } else { "Enable" }
     }
 }
+
+/// The notification shown when the app starts enabled, for a user who forgot
+/// it starts that way (R14). It shows only then, so it always says enabled.
+pub const STARTED_ENABLED_NOTICE: &str = "SAW Auto-Clicker is running and is enabled.";
 
 /// Spots, from the events the gate sees, the moment a burst starts: the
 /// first of the app's own injections to pass after a physical press. That
@@ -92,18 +102,32 @@ mod tests {
     #[test]
     fn the_tooltip_names_the_state_and_r16s_message_while_it_applies() {
         let mut state = TrayState::default();
-        assert_eq!(state.tooltip(), "saw-auto-clicker: disabled");
+        assert_eq!(state.tooltip(), "SAW Auto-Clicker: disabled");
         state.enabled = true;
-        assert_eq!(state.tooltip(), "saw-auto-clicker: enabled");
+        assert_eq!(state.tooltip(), "SAW Auto-Clicker: enabled");
         state.elevated_warning = true;
         assert_eq!(
             state.tooltip(),
-            format!("saw-auto-clicker: enabled\n{ELEVATED_MESSAGE}")
+            format!("SAW Auto-Clicker: enabled\n{ELEVATED_MESSAGE}")
         );
         state.hotkey_missing = true;
         assert_eq!(
             state.tooltip(),
-            format!("saw-auto-clicker: enabled\n{ELEVATED_MESSAGE}\n{HOTKEY_MISSING_MESSAGE}")
+            format!("SAW Auto-Clicker: enabled\n{ELEVATED_MESSAGE}\n{HOTKEY_MISSING_MESSAGE}")
+        );
+    }
+
+    #[test]
+    fn with_no_apps_the_tooltip_says_so_in_place_of_r16s_message() {
+        let state = TrayState {
+            enabled: true,
+            elevated_warning: true,
+            hotkey_missing: true,
+            no_apps: true,
+        };
+        assert_eq!(
+            state.tooltip(),
+            format!("SAW Auto-Clicker: enabled\n{NO_APPS_MESSAGE}\n{HOTKEY_MISSING_MESSAGE}")
         );
     }
 
@@ -126,12 +150,21 @@ mod tests {
     #[test]
     fn the_tooltip_fits_the_tray_limit() {
         // A notification-area tooltip holds 127 characters plus the NUL.
-        let state = TrayState {
-            enabled: false,
-            elevated_warning: true,
-            hotkey_missing: true,
-        };
-        assert!(state.tooltip().encode_utf16().count() <= 127);
+        for no_apps in [false, true] {
+            let state = TrayState {
+                enabled: false,
+                elevated_warning: true,
+                hotkey_missing: true,
+                no_apps,
+            };
+            assert!(state.tooltip().encode_utf16().count() <= 127, "{no_apps}");
+        }
+    }
+
+    #[test]
+    fn the_started_enabled_notice_fits_the_notification() {
+        // NOTIFYICONDATAW holds 255 characters of text.
+        assert!(STARTED_ENABLED_NOTICE.encode_utf16().count() <= 255);
     }
 
     #[test]

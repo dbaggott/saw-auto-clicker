@@ -24,6 +24,7 @@ pub struct Settings {
     jitter: bool,
     buttons: ClickButtons,
     hotkey: Option<Hotkey>,
+    apps: Apps,
 }
 
 impl Settings {
@@ -46,12 +47,18 @@ impl Settings {
             jitter,
             buttons,
             hotkey,
+            apps: Apps::default(),
         })
     }
 
     /// These settings with `hotkey` in place of their own.
     pub fn with_hotkey(self, hotkey: Option<Hotkey>) -> Settings {
         Settings { hotkey, ..self }
+    }
+
+    /// These settings with `apps` in place of their own.
+    pub fn with_apps(self, apps: Apps) -> Settings {
+        Settings { apps, ..self }
     }
 
     pub fn cps(&self) -> u32 {
@@ -76,6 +83,11 @@ impl Settings {
         self.hotkey
     }
 
+    /// The apps that auto-click (R21). Empty, the default, means none do.
+    pub fn apps(&self) -> &Apps {
+        &self.apps
+    }
+
     /// The nominal click interval T, one second over the CPS.
     pub fn interval(&self) -> Duration {
         Duration::from_secs(1) / self.cps
@@ -90,9 +102,81 @@ impl Default for Settings {
             jitter: false,
             buttons: ClickButtons::Both,
             hotkey: None,
+            apps: Apps::default(),
         }
     }
 }
+
+/// The apps auto-clicking happens in (R21), each named by its executable's
+/// file name, such as `game.exe`. Names match ignoring case, over all of
+/// Unicode, and the list never holds two that match.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Apps(Vec<String>);
+
+impl Apps {
+    /// Adds `name`, without surrounding whitespace, unless the list already
+    /// holds it in any case, and says whether it did.
+    pub fn add(&mut self, name: &str) -> Result<bool, AppNameError> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(AppNameError::Empty);
+        }
+        if name.contains(['/', '\\']) {
+            return Err(AppNameError::Path(name.to_string()));
+        }
+        if self.contains(name) {
+            return Ok(false);
+        }
+        self.0.push(name.to_string());
+        Ok(true)
+    }
+
+    /// Removes `name`, in any case.
+    pub fn remove(&mut self, name: &str) {
+        let name = name.to_lowercase();
+        self.0.retain(|n| n.to_lowercase() != name);
+    }
+
+    pub fn contains(&self, name: &str) -> bool {
+        let name = name.to_lowercase();
+        self.0.iter().any(|n| n.to_lowercase() == name)
+    }
+
+    /// The names in the order they were added, each as first written.
+    pub fn names(&self) -> &[String] {
+        &self.0
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
+/// Why a name can't be one of the [`Apps`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AppNameError {
+    Empty,
+    /// A path, where only the file name is matched.
+    Path(String),
+}
+
+impl fmt::Display for AppNameError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AppNameError::Empty => f.write_str("an app's name can't be empty"),
+            AppNameError::Path(name) => write!(
+                f,
+                "an app is named by its file name alone, such as \"app.exe\", got \"{name}\""
+            ),
+        }
+    }
+}
+
+impl std::error::Error for AppNameError {}
 
 /// Which mouse buttons auto-click when held.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -237,7 +321,36 @@ mod tests {
         assert!(!s.jitter());
         assert_eq!(s.buttons(), ClickButtons::Both);
         assert_eq!(s.hotkey(), None);
+        assert!(s.apps().is_empty());
         assert_eq!(s.interval(), ms(100));
+    }
+
+    #[test]
+    fn apps_match_and_collapse_ignoring_case_beyond_ascii() {
+        let mut apps = Apps::default();
+        assert_eq!(apps.add("Spiel.exe"), Ok(true));
+        assert_eq!(apps.add("ÉCLAIR.EXE"), Ok(true));
+        assert_eq!(apps.add("spiel.EXE"), Ok(false));
+        assert_eq!(apps.add("éclair.exe"), Ok(false));
+        assert_eq!(apps.add(" spiel.exe\t"), Ok(false));
+        assert_eq!(apps.add(" other.exe "), Ok(true));
+        assert_eq!(apps.names(), ["Spiel.exe", "ÉCLAIR.EXE", "other.exe"]);
+        apps.remove("other.exe");
+        assert!(apps.contains("SPIEL.exe") && apps.contains("Éclair.exe"));
+        assert!(!apps.contains("spiel") && !apps.contains("other.exe"));
+        apps.remove("éclair.EXE");
+        assert_eq!(apps.names(), ["Spiel.exe"]);
+    }
+
+    #[test]
+    fn an_empty_name_or_a_path_is_not_an_app() {
+        let mut apps = Apps::default();
+        assert_eq!(apps.add(""), Err(AppNameError::Empty));
+        assert_eq!(apps.add("  "), Err(AppNameError::Empty));
+        for path in ["C:\\Games\\app.exe", "bin/app.exe"] {
+            assert_eq!(apps.add(path), Err(AppNameError::Path(path.into())));
+        }
+        assert!(apps.is_empty());
     }
 
     #[test]

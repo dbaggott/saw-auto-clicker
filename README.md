@@ -2,7 +2,9 @@
 
 My kiddo complained to me that the auto-clickers he was finding were from "shady ass websites" that he didn't trust.  He asked me to make one for him and so it was that the SAW auto-clicker was born.  SAW stands for Shady Azz Website and the full experience is at https://shadyazzwebsite.dnbg.app 
 
-It works according to his specifications -- it can be enabled or disabled with a configurable hot key.  When enabled, holding the mouse button for longer than the configurable delay causes the mouse to start auto-clicking at the target clicks per second (also configurable).  It probably works for trackpad-based clicking but that hasn't been tested on anything other than a Windows running in a VM on MacOS.
+It works according to his specifications -- it can be enabled or disabled with a configurable hot key. When enabled, holding the mouse button for longer than the configurable delay causes the mouse to start auto-clicking at the target clicks per second (also configurable). It includes optional jitter to provide some natural variation to the clicking (target speed and click spacing). After some use in the field, we added an allow list so that it only functions in allowed applications and doesn't accidentally wreak havoc somewhere else if you forget to disable it.
+
+It probably works for trackpad-based clicking but that hasn't been tested on anything other than a Windows running in a VM on MacOS.
 
 The auto-clicker runs on Windows-only currently.  Open an issue if you want it on another OS.
 
@@ -15,6 +17,8 @@ It installs for your user only. The installer isn't signed so you may get warnin
 ## How to use it
 
 When you start saw-auto-clicker, its settings window opens. Closing the window leaves it running in the system tray (the notification area, near the clock), as a saw-blade icon. Click that icon to enable or disable auto-clicking, open the settings again, or quit. Windows may tuck a new icon behind the ^ arrow next to the clock; you can drag it out onto the taskbar to keep it in view. Starting saw-auto-clicker again while it's running opens its settings window.
+
+It only auto-clicks in the applications you allow, under **Applications** in the settings window, so a drag in File Explorer or a browser stays a drag. None are allowed at first: start the game or program you want, then add it there. The settings window also has a switch that enables and disables auto-clicking, as the tray menu and the hotkey do. An app is matched by its program's file name, so choosing one that hosts other programs, such as a Java runtime, turns on everything it runs.
 
 Changes in the settings window are saved as you make them. The butterfly button sets the clicks per second to what a person can reach by butterfly clicking and turns on Jitter, which adds natural variation to the click rate.
 

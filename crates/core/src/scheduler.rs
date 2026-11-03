@@ -7,7 +7,7 @@ use crate::backend::{Inject, Observe};
 use crate::clock::{Clock, Time};
 use crate::gate::{Button, ButtonEvent, Direction, Source};
 use crate::jitter::{Cycle, Grid, HUMAN_JITTER, MIN_PHASE, RATE_SPREAD, Rate};
-use crate::settings::Settings;
+use crate::settings::{Apps, Settings};
 
 /// The floor on how long an injection may go unechoed before the observation
 /// counts as dead (D8); the timeout is this or twice the interval.
@@ -32,8 +32,8 @@ pub(crate) enum Input {
 pub enum Status {
     Enabled,
     Disabled,
-    /// A burst did not start, or ended, because the window under the cursor
-    /// can't be injected into (R16).
+    /// A burst did not start, or ended, because the window under the cursor,
+    /// one of the chosen apps, can't be injected into (R16).
     TargetNotInjectable(Button),
 }
 
@@ -329,9 +329,12 @@ impl<B: Observe + Inject> Scheduler<B> {
                     *track = Track::Held;
                     return None;
                 }
-                if !self.backend.can_inject_at_cursor() {
+                // The current settings' apps, not the press's: removing an
+                // app stops it bursting from then on, as the check before
+                // each up does.
+                if let Some(refusal) = refusal(&mut self.backend, self.settings.apps()) {
                     *track = Track::Held;
-                    (self.on_status)(Status::TargetNotInjectable(button));
+                    refusal.report(button, &mut self.on_status);
                     return None;
                 }
                 *track = Track::Burst(Burst::new(start, settings, self.rng.fork()));
@@ -348,11 +351,13 @@ impl<B: Observe + Inject> Scheduler<B> {
                 if now < due {
                     return Some(due);
                 }
-                if burst.next == Direction::Up && !self.backend.can_inject_at_cursor() {
+                if burst.next == Direction::Up
+                    && let Some(refusal) = refusal(&mut self.backend, self.settings.apps())
+                {
                     // The last injection was a down, so the physical up ends
                     // the burst cleanly.
                     *track = Track::Held;
-                    (self.on_status)(Status::TargetNotInjectable(button));
+                    refusal.report(button, &mut self.on_status);
                     return None;
                 }
                 let direction = burst.next;
@@ -397,6 +402,42 @@ impl<B: Observe + Inject> Scheduler<B> {
     fn reinstall(&mut self, now: Time) {
         self.backend.reinstall();
         self.last_reinstall = now;
+    }
+}
+
+/// Why a burst may not start, or go on, over `target`.
+#[derive(Clone, Copy)]
+enum Refusal {
+    /// Not one of the chosen apps (R21). That is ordinary use, so it is not
+    /// reported, and it is checked first, so an elevated window outside the
+    /// chosen apps is not reported either.
+    NotChosen,
+    /// R16.
+    NotInjectable,
+}
+
+impl Refusal {
+    fn report(self, button: Button, on_status: &mut dyn FnMut(Status)) {
+        match self {
+            Refusal::NotChosen => {}
+            Refusal::NotInjectable => on_status(Status::TargetNotInjectable(button)),
+        }
+    }
+}
+
+/// Reads the target only when some app is chosen: with none, the answer
+/// can't depend on it.
+fn refusal(backend: &mut impl Inject, apps: &Apps) -> Option<Refusal> {
+    if apps.is_empty() {
+        return Some(Refusal::NotChosen);
+    }
+    let target = backend.target_at_cursor();
+    if !target.app.as_deref().is_some_and(|app| apps.contains(app)) {
+        Some(Refusal::NotChosen)
+    } else if !target.injectable {
+        Some(Refusal::NotInjectable)
+    } else {
+        None
     }
 }
 

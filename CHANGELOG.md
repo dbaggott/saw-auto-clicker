@@ -2,6 +2,17 @@
 
 Each release's notes are its section here. CI fails when the workspace version in `Cargo.toml` has no section, so bumping the version means writing one.
 
+## v2.0.0
+
+- Auto-clicking now happens only in the applications you allow, so holding a button to drag files, select text or move a window in any other program works as usual. Allow applications in Settings, under Applications, from the programs that are running.
+- After upgrading, no applications are allowed, so the app auto-clicks nowhere until you add one. The settings window and the tray icon's tooltip say so while none are allowed.
+- The settings window has an Enabled switch, which shows and changes the same state as the tray menu and the hotkey.
+- A new install now has Enable on startup on. An upgraded install keeps its setting.
+- When the app starts enabled, a Windows notification says so.
+- The settings window's taskbar icon now shows whether the app is enabled, as the tray icon does.
+- The app calls itself SAW Auto-Clicker in its tray tooltip, settings window, messages, and the installer and Settings > Apps. The Start menu shortcut is renamed to match, and its install folder keeps its name.
+- Windows forgets once whether you had the tray icon shown on the taskbar or in the overflow area; set it again if you had moved it.
+
 ## v1.0.0
 
 - The butterfly button now sets 15 clicks per second, up from 12. A saved 12 with Jitter on no longer shows as butterfly clicking.

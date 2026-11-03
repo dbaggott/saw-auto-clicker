@@ -1,5 +1,6 @@
-//! The elevated-target check (R16, C5): whether an injection now would reach
-//! the window under the cursor, judged by comparing integrity levels.
+//! The target, the top-level window under the cursor: whether an injection
+//! now would reach it, judged by comparing integrity levels (R16, C5), and
+//! which app it belongs to (R21).
 
 /// UIPI blocks injection into a higher integrity level, and does so silently,
 /// so a level that can't be read counts as higher.
@@ -15,19 +16,19 @@ mod win {
     use std::io;
     use std::mem::size_of;
 
+    use saw_core::Target;
     use windows::Win32::Foundation::{HANDLE, POINT};
     use windows::Win32::Security::{
         GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, TOKEN_MANDATORY_LABEL,
         TOKEN_QUERY, TokenIntegrityLevel,
     };
-    use windows::Win32::System::Threading::{
-        GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
-    };
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
     use windows::Win32::UI::WindowsAndMessaging::{
-        GA_ROOT, GetAncestor, GetCursorPos, GetWindowThreadProcessId, WindowFromPoint,
+        GA_ROOT, GetAncestor, GetCursorPos, WindowFromPoint,
     };
 
     use super::injectable;
+    use crate::apps::{executable_name, window_process};
     use crate::handle::OwnedHandle;
 
     pub(crate) struct TargetCheck {
@@ -41,13 +42,20 @@ mod win {
             Ok(TargetCheck { own_level })
         }
 
-        /// The target is the top-level window under the cursor.
-        pub(crate) fn target_injectable(&self) -> bool {
-            injectable(self.own_level, target_level().ok())
+        pub(crate) fn target(&self) -> Target {
+            let process = target_process().ok();
+            let level = process
+                .as_ref()
+                .and_then(|p| unsafe { integrity_level(p.raw()) }.ok());
+            Target {
+                injectable: injectable(self.own_level, level),
+                app: process.and_then(|p| executable_name(p.raw()).ok()),
+            }
         }
     }
 
-    fn target_level() -> io::Result<u32> {
+    /// The process that owns the top-level window under the cursor.
+    fn target_process() -> io::Result<OwnedHandle> {
         unsafe {
             let mut cursor = POINT::default();
             GetCursorPos(&mut cursor)?;
@@ -55,14 +63,7 @@ mod win {
             if window.is_invalid() {
                 return Err(io::Error::other("no window under the cursor"));
             }
-            let mut pid = 0;
-            GetWindowThreadProcessId(window, Some(&mut pid));
-            if pid == 0 {
-                return Err(io::Error::last_os_error());
-            }
-            let process =
-                OwnedHandle::new(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid)?);
-            integrity_level(process.raw())
+            Ok(window_process(window)?.1)
         }
     }
 

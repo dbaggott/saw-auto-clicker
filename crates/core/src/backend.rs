@@ -32,8 +32,19 @@ pub trait Inject {
     /// observing thread reports it as [`Source::Tagged`](crate::Source::Tagged).
     fn inject(&mut self, button: Button, direction: Direction);
 
-    /// Whether an injection now would reach the window under the cursor (R16).
-    fn can_inject_at_cursor(&mut self) -> bool;
+    /// What an injection now would reach: the top-level window under the
+    /// cursor, read once for both of R16's and R21's checks.
+    fn target_at_cursor(&mut self) -> Target;
+}
+
+/// The top-level window under the cursor.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Target {
+    /// Whether an injection would reach it (R16).
+    pub injectable: bool,
+    /// The file name of its process's executable, such as `app.exe`, or
+    /// `None` when that can't be read (R21).
+    pub app: Option<String>,
 }
 
 pub trait RegisterHotkey {

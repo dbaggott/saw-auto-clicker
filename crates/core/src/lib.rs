@@ -17,12 +17,12 @@ mod settings;
 #[cfg(test)]
 mod tests;
 
-pub use backend::{HotkeyError, Inject, Observe, RegisterHotkey};
+pub use backend::{HotkeyError, Inject, Observe, RegisterHotkey, Target};
 pub use clock::{Clock, StdClock, Time};
 pub use gate::{Button, ButtonEvent, ButtonGate, Direction, Source, Verdict};
 pub use runtime::{Controller, SchedulerHandle, spawn};
 pub use scheduler::Status;
 pub use settings::{
-    ACTIVATION_DELAY_RANGE, BUTTERFLY_CPS, CPS_RANGE, ClickButtons, Hotkey, Key, Modifiers,
-    Settings, SettingsError,
+    ACTIVATION_DELAY_RANGE, AppNameError, Apps, BUTTERFLY_CPS, CPS_RANGE, ClickButtons, Hotkey,
+    Key, Modifiers, Settings, SettingsError,
 };
