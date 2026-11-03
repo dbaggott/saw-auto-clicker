@@ -7,6 +7,7 @@ mod fly_to_tray;
 mod instance;
 mod settings_window;
 mod tray;
+mod window_icon;
 
 use std::process::ExitCode;
 use std::time::Duration;

@@ -4,9 +4,11 @@ Each release's notes are its section here. CI fails when the workspace version i
 
 ## v2.0.0
 
-- Auto-clicking now happens only in the apps you choose, so holding a button to drag files, select text or move a window in any other program works as usual. Choose apps in Settings, under Where it auto-clicks, from the programs that have a window open.
-- After upgrading, no apps are chosen, so the app auto-clicks nowhere until you add one. The settings window and the tray icon's tooltip say so while none are chosen.
-- When the app starts enabled, a Windows notification says so, and how many apps it auto-clicks in.
+- Auto-clicking now happens only in the applications you allow, so holding a button to drag files, select text or move a window in any other program works as usual. Allow applications in Settings, under Applications, from the programs that are running.
+- After upgrading, no applications are allowed, so the app auto-clicks nowhere until you add one. The settings window and the tray icon's tooltip say so while none are allowed.
+- The settings window has an Enabled switch, which shows and changes the same state as the tray menu and the hotkey.
+- A new install now has Enable on startup on. An upgraded install keeps its setting.
+- When the app starts enabled, a Windows notification says so, and how many applications it auto-clicks in.
 - The settings window's taskbar icon now shows whether the app is enabled, as the tray icon does.
 - Windows forgets once whether you had the tray icon shown on the taskbar or in the overflow area; set it again if you had moved it.
 

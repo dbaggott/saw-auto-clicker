@@ -16,7 +16,7 @@ It installs for your user only. The installer isn't signed so you may get warnin
 
 When you start saw-auto-clicker, its settings window opens. Closing the window leaves it running in the system tray (the notification area, near the clock), as a saw-blade icon. Click that icon to enable or disable auto-clicking, open the settings again, or quit. Windows may tuck a new icon behind the ^ arrow next to the clock; you can drag it out onto the taskbar to keep it in view. Starting saw-auto-clicker again while it's running opens its settings window.
 
-It only auto-clicks in the apps you choose, under **Where it auto-clicks** in the settings window, so a drag in File Explorer or a browser stays a drag. No apps are chosen at first: start the game or program you want, then add it there. An app is matched by its program's file name, so choosing one that hosts other programs, such as a Java runtime, turns on everything it runs.
+It only auto-clicks in the applications you allow, under **Applications** in the settings window, so a drag in File Explorer or a browser stays a drag. None are allowed at first: start the game or program you want, then add it there. The settings window also has a switch that enables and disables auto-clicking, as the tray menu and the hotkey do. An app is matched by its program's file name, so choosing one that hosts other programs, such as a Java runtime, turns on everything it runs.
 
 Changes in the settings window are saved as you make them. The butterfly button sets the clicks per second to what a person can reach by butterfly clicking and turns on Jitter, which adds natural variation to the click rate.
 

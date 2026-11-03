@@ -135,7 +135,20 @@ impl Tray {
         // A refused update leaves the previous look, and the next change
         // tries again.
         let _ = self.icon.set_icon(Some(icon.clone()));
-        let _ = self.icon.set_tooltip(Some(state.tooltip()));
+        let tooltip = state.tooltip();
+        match self.guid {
+            // `tray-icon` 0.26.1 addresses its tooltip updates by window and
+            // id alone, without the GUID, and on the test VM the tooltip of
+            // an icon registered under a GUID never changed that way.
+            Some(guid) => {
+                modify(&self.icon, guid, NIF_TIP, |nid| {
+                    copy_text(&mut nid.szTip, &tooltip)
+                });
+            }
+            None => {
+                let _ = self.icon.set_tooltip(Some(tooltip));
+            }
+        }
         self.toggle.set_text(state.toggle_label());
     }
 

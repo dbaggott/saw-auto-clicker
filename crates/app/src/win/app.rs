@@ -174,6 +174,9 @@ impl App {
             clicker: Some(clicker),
         };
         if loaded.first_run {
+            // Safe to enable by default now that only allowed applications
+            // auto-click (R21).
+            app.enable_on_startup = true;
             app.save();
         }
         if loaded.first_run || loaded.enable_on_startup || persist == Persist::No {
@@ -192,6 +195,12 @@ impl App {
 
     pub fn enabled(&self) -> bool {
         self.tray_state.enabled
+    }
+
+    /// Enables or disables, as the tray menu and the hotkey do; the state
+    /// shown changes when the clicker reports it.
+    pub fn set_enabled(&self, enabled: bool) {
+        self.clicker().controller().set_enabled(enabled);
     }
 
     /// The main thread's loop: tray clicks, the clicker's reports, and the
