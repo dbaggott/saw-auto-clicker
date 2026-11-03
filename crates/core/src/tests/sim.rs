@@ -14,11 +14,11 @@ use std::time::Duration;
 
 use fastrand::Rng;
 
-use crate::backend::{Inject, Observe};
+use crate::backend::{Inject, Observe, Target};
 use crate::clock::{Clock, Time};
 use crate::gate::{Button, ButtonEvent, ButtonGate, Direction, Inbox, Source, Verdict};
 use crate::scheduler::{Input, Scheduler, Status, Wake};
-use crate::settings::{ClickButtons, Settings};
+use crate::settings::{Apps, ClickButtons, Settings};
 
 pub fn ms(n: u64) -> Duration {
     Duration::from_millis(n)
@@ -36,8 +36,21 @@ pub fn at_us(n: u64) -> Time {
     Time::from_epoch(us(n))
 }
 
+/// The app the fake backend's target belongs to unless a test says otherwise.
+pub const TARGET_APP: &str = "app.exe";
+
+/// The apps listing only [`TARGET_APP`].
+pub fn target_app_listed() -> Apps {
+    let mut apps = Apps::default();
+    apps.add(TARGET_APP).unwrap();
+    apps
+}
+
+/// Settings with [`TARGET_APP`] among the apps, so holds burst.
 pub fn settings(cps: u32, delay_ms: u64, jitter: bool) -> Settings {
-    Settings::new(cps, ms(delay_ms), jitter, ClickButtons::Both, None).unwrap()
+    Settings::new(cps, ms(delay_ms), jitter, ClickButtons::Both, None)
+        .unwrap()
+        .with_apps(target_app_listed())
 }
 
 /// An event applications received.
@@ -60,6 +73,7 @@ enum Happening {
     Control(Input),
     KillObservation,
     Injectable(bool),
+    TargetApp(Option<String>),
 }
 
 struct World {
@@ -72,6 +86,7 @@ struct World {
     delivered: Vec<(Button, Delivery)>,
     injections: Vec<(Button, Injection)>,
     injectable: bool,
+    target_app: Option<String>,
     reinstalls: Vec<Time>,
     reinstall_pending: bool,
     statuses: Vec<(Time, Status)>,
@@ -110,8 +125,12 @@ impl Inject for FakeBackend {
         );
     }
 
-    fn can_inject_at_cursor(&mut self) -> bool {
-        self.0.lock().unwrap().injectable
+    fn target_at_cursor(&mut self) -> Target {
+        let world = self.0.lock().unwrap();
+        Target {
+            injectable: world.injectable,
+            app: world.target_app.clone(),
+        }
     }
 }
 
@@ -167,6 +186,7 @@ impl Sim {
             delivered: Vec::new(),
             injections: Vec::new(),
             injectable: true,
+            target_app: Some(TARGET_APP.into()),
             reinstalls: Vec::new(),
             reinstall_pending: false,
             statuses: Vec::new(),
@@ -237,6 +257,12 @@ impl Sim {
 
     pub fn set_injectable_at(&mut self, at: Time, injectable: bool) {
         self.schedule(at, Happening::Injectable(injectable));
+    }
+
+    /// From `at`, the target belongs to `app`, or to an app whose name
+    /// can't be read.
+    pub fn set_target_app_at(&mut self, at: Time, app: Option<&str>) {
+        self.schedule(at, Happening::TargetApp(app.map(str::to_string)));
     }
 
     pub fn set_echo_latency(&mut self, latency: Duration) {
@@ -326,6 +352,7 @@ impl Sim {
             Happening::Control(input) => self.control.send(input),
             Happening::KillObservation => self.world().observing = false,
             Happening::Injectable(injectable) => self.world().injectable = injectable,
+            Happening::TargetApp(app) => self.world().target_app = app,
         }
     }
 

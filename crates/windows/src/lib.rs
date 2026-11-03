@@ -1,10 +1,12 @@
 //! Windows backend of saw-auto-clicker: a low-level mouse hook on its own
 //! thread, tagged `SendInput` injection, a high-resolution waitable timer,
-//! the toggle hotkey and the elevated-target check, wired to the core by
+//! the toggle hotkey, the target check and the list of running apps, wired to the core by
 //! [`Clicker`]. Win32 code lives behind `cfg(windows)` so the workspace still
 //! checks on other hosts.
 
 // Portable so their tests run anywhere; only the Windows code calls them.
+#[cfg_attr(not(windows), allow(dead_code))]
+mod apps;
 #[cfg_attr(not(windows), allow(dead_code))]
 mod hotkey_slot;
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -25,6 +27,8 @@ mod hotkey;
 #[cfg(windows)]
 mod throttling;
 
+#[cfg(windows)]
+pub use apps::running_apps;
 #[cfg(windows)]
 pub use clicker::Clicker;
 #[cfg(windows)]

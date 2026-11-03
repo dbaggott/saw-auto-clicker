@@ -20,6 +20,8 @@ mod hotkey_text;
 mod icon;
 #[cfg_attr(not(windows), allow(dead_code))]
 mod status;
+#[cfg_attr(not(windows), allow(dead_code))]
+mod tray_guid;
 
 #[cfg(windows)]
 mod win;

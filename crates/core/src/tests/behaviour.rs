@@ -1,12 +1,12 @@
 //! What the user sees: short presses untouched (R3), holds auto-clicking per
-//! button (R4, R5), the enabled state (R2), elevated targets (R16), and when
-//! changed settings apply (Q-c).
+//! button (R4, R5), the enabled state (R2), elevated targets (R16), the
+//! chosen apps (R21), and when changed settings apply (Q-c).
 
 use super::sim::*;
 use crate::clock::Time;
 use crate::gate::{Button, Direction, Source};
 use crate::scheduler::{Input, Status};
-use crate::settings::{ClickButtons, Settings};
+use crate::settings::{Apps, ClickButtons, Settings};
 
 const LEFT: Button = Button::Left;
 const RIGHT: Button = Button::Right;
@@ -72,7 +72,9 @@ fn a_button_left_out_of_the_click_buttons_passes_untouched() {
         (ClickButtons::Left, LEFT, RIGHT),
         (ClickButtons::Right, RIGHT, LEFT),
     ] {
-        let s = Settings::new(10, ms(250), false, buttons, None).unwrap();
+        let s = Settings::new(10, ms(250), false, buttons, None)
+            .unwrap()
+            .with_apps(target_app_listed());
         let mut sim = Sim::enabled(s);
         sim.press(LEFT, at_ms(0));
         sim.press(RIGHT, at_ms(0));
@@ -232,4 +234,92 @@ fn a_press_held_across_enabling_starts_no_burst() {
         physical(&sim, LEFT),
         [(at_ms(0), Direction::Down), (at_ms(1_000), Direction::Up)]
     );
+}
+
+/// Settings that list `apps` and nothing else.
+fn listing(apps: &[&str]) -> Settings {
+    let mut list = Apps::default();
+    for app in apps {
+        list.add(app).unwrap();
+    }
+    settings(10, 250, false).with_apps(list)
+}
+
+#[test]
+fn a_hold_outside_the_chosen_apps_gets_no_burst_and_passes_untouched() {
+    let cases: [(&str, Settings, Option<&str>); 3] = [
+        ("not listed", settings(10, 250, false), Some("other.exe")),
+        ("empty list", listing(&[]), Some(TARGET_APP)),
+        ("unreadable name", settings(10, 250, false), None),
+    ];
+    for (case, settings, target) in cases {
+        let mut sim = Sim::enabled(settings);
+        sim.set_target_app_at(at_ms(0), target);
+        // Not reported even over a window it couldn't click into.
+        sim.set_injectable_at(at_ms(0), false);
+        let times = [(0, 1_000)];
+        presses(&mut sim, LEFT, &times);
+        sim.run_until(at_ms(5_000));
+        assert!(sim.injections(LEFT).is_empty(), "{case}");
+        assert_eq!(physical(&sim, LEFT), expected(&times), "{case}");
+        assert_eq!(sim.statuses(), [(at_ms(0), Status::Enabled)], "{case}");
+    }
+}
+
+#[test]
+fn chosen_apps_match_ignoring_case_beyond_ascii() {
+    let mut sim = Sim::enabled(listing(&["éclair.exe"]));
+    sim.set_target_app_at(at_ms(0), Some("ÉCLAIR.EXE"));
+    sim.press(LEFT, at_ms(0));
+    sim.release(LEFT, at_ms(1_000));
+    sim.run_until(at_ms(2_000));
+    assert_eq!(sim.injections(LEFT).len(), 14);
+    sim.assert_ends_cleanly(LEFT, at_ms(1_000));
+}
+
+/// A burst over `TARGET_APP` that something at 400 ms takes out of the chosen
+/// apps: the up due at 410 ms is never injected, and the burst ends logically
+/// down, closed by the physical release alone.
+fn assert_ends_at_410_ms_logically_down(sim: &mut Sim) {
+    sim.press(LEFT, at_ms(0));
+    sim.release(LEFT, at_ms(800));
+    sim.run_until(at_ms(2_000));
+    assert!(sim.injections(LEFT).iter().all(|i| i.at <= at_ms(350)));
+    let delivered = sim.delivered(LEFT);
+    let before_release = delivered[delivered.len() - 2];
+    assert_eq!(
+        (before_release.direction, before_release.source),
+        (Direction::Down, Source::Tagged)
+    );
+    assert_eq!(
+        delivered.last().map(|d| (d.at, d.direction, d.source)),
+        Some((at_ms(800), Direction::Up, Source::Physical))
+    );
+    sim.assert_ends_cleanly(LEFT, at_ms(400));
+    assert_eq!(sim.statuses(), [(at_ms(0), Status::Enabled)]);
+}
+
+#[test]
+fn moving_onto_an_app_not_chosen_ends_the_burst_logically_down() {
+    let mut sim = Sim::enabled(settings(10, 250, false));
+    sim.set_target_app_at(at_ms(400), Some("other.exe"));
+    assert_ends_at_410_ms_logically_down(&mut sim);
+}
+
+#[test]
+fn removing_the_app_mid_burst_ends_the_burst_logically_down() {
+    let mut sim = Sim::enabled(settings(10, 250, false));
+    sim.control_at(at_ms(400), Input::SetSettings(listing(&[])));
+    assert_ends_at_410_ms_logically_down(&mut sim);
+}
+
+#[test]
+fn removing_the_app_during_the_delay_prevents_the_burst() {
+    let mut sim = Sim::enabled(settings(10, 250, false));
+    sim.press(LEFT, at_ms(0));
+    sim.control_at(at_ms(100), Input::SetSettings(listing(&["other.exe"])));
+    sim.release(LEFT, at_ms(1_000));
+    sim.run_until(at_ms(2_000));
+    assert!(sim.injections(LEFT).is_empty());
+    assert_eq!(physical(&sim, LEFT), expected(&[(0, 1_000)]));
 }

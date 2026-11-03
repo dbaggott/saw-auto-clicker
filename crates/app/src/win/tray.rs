@@ -1,7 +1,15 @@
-//! The tray icon and its menu (R14).
+//! The tray icon, its menu, and the notification it shows (R14).
+
+use std::mem::size_of;
 
 use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
+use windows::Win32::Foundation::HWND;
+use windows::Win32::UI::Shell::{
+    NIF_GUID, NIF_INFO, NIF_TIP, NIIF_INFO, NIM_MODIFY, NOTIFY_ICON_DATA_FLAGS, NOTIFYICONDATAW,
+    Shell_NotifyIconW,
+};
+use windows::core::GUID;
 
 use crate::flight::ScreenRect;
 use crate::icon;
@@ -20,6 +28,10 @@ pub enum MenuAction {
 
 pub struct Tray {
     icon: TrayIcon,
+    /// The GUID the icon registered under, which is how the notification
+    /// addresses it. `None` when registering under it failed, and the icon
+    /// registered without one.
+    guid: Option<u128>,
     enabled_icon: Icon,
     disabled_icon: Icon,
     toggle: MenuItem,
@@ -30,8 +42,10 @@ pub struct Tray {
 
 impl Tray {
     /// Must run on a thread that pumps window messages, which then delivers
-    /// the menu's clicks to [`MenuEvent::receiver`].
-    pub fn new(state: TrayState, start_at_login: bool) -> Result<Tray, String> {
+    /// the menu's clicks to [`MenuEvent::receiver`]. The icon registers under
+    /// `guid` when it can, and otherwise without one, which leaves it no
+    /// notification.
+    pub fn new(state: TrayState, start_at_login: bool, guid: Option<u128>) -> Result<Tray, String> {
         let draw = |enabled| {
             Icon::from_rgba(icon::rgba(enabled), icon::SIZE, icon::SIZE)
                 .map_err(|e| format!("cannot make the tray icon: {e}"))
@@ -50,24 +64,61 @@ impl Tray {
             &quit,
         ])
         .map_err(|e| format!("cannot build the tray menu: {e}"))?;
-        let icon = TrayIconBuilder::new()
-            .with_menu(Box::new(menu))
-            .with_tooltip(state.tooltip())
-            .with_icon(if state.enabled {
-                enabled_icon.clone()
-            } else {
-                disabled_icon.clone()
-            })
-            .build()
-            .map_err(|e| format!("cannot create the tray icon: {e}"))?;
+        let build = |guid: Option<u128>| {
+            let mut builder = TrayIconBuilder::new()
+                .with_menu(Box::new(menu.clone()))
+                .with_tooltip(state.tooltip())
+                .with_icon(if state.enabled {
+                    enabled_icon.clone()
+                } else {
+                    disabled_icon.clone()
+                });
+            if let Some(guid) = guid {
+                builder = builder.with_guid(guid);
+            }
+            builder
+                .build()
+                .map_err(|e| format!("cannot create the tray icon: {e}"))
+        };
+        // `build` succeeds even when Windows refuses the icon, and leaves it
+        // to register when the taskbar next starts, so only a call addressed
+        // by the GUID shows whether it registered.
+        let registered = match guid {
+            Some(guid) => {
+                let icon = build(Some(guid))?;
+                let tooltip = state.tooltip();
+                let ok = modify(&icon, guid, NIF_TIP, |nid| {
+                    copy_text(&mut nid.szTip, &tooltip)
+                });
+                ok.then_some((icon, Some(guid)))
+            }
+            None => None,
+        };
+        let (icon, guid) = match registered {
+            Some(registered) => registered,
+            None => (build(None)?, None),
+        };
         Ok(Tray {
             icon,
+            guid,
             enabled_icon,
             disabled_icon,
             toggle,
             settings,
             start_at_login,
             quit,
+        })
+    }
+
+    /// Shows a Windows notification from the icon, if it has a GUID, and
+    /// says whether Windows took it.
+    pub fn notify(&self, title: &str, text: &str) -> bool {
+        self.guid.is_some_and(|guid| {
+            modify(&self.icon, guid, NIF_INFO, |nid| {
+                copy_text(&mut nid.szInfoTitle, title);
+                copy_text(&mut nid.szInfo, text);
+                nid.dwInfoFlags = NIIF_INFO;
+            })
         })
     }
 
@@ -113,4 +164,35 @@ impl Tray {
             None
         }
     }
+}
+
+/// Sends `NIM_MODIFY` for `flags` to the icon registered under `guid`, with
+/// `fill` setting what they name, and says whether Windows took it.
+fn modify(
+    icon: &TrayIcon,
+    guid: u128,
+    flags: NOTIFY_ICON_DATA_FLAGS,
+    fill: impl FnOnce(&mut NOTIFYICONDATAW),
+) -> bool {
+    let mut nid = NOTIFYICONDATAW {
+        cbSize: size_of::<NOTIFYICONDATAW>() as u32,
+        hWnd: HWND(icon.window_handle()),
+        uFlags: flags | NIF_GUID,
+        guidItem: GUID::from_u128(guid),
+        ..NOTIFYICONDATAW::default()
+    };
+    fill(&mut nid);
+    unsafe { Shell_NotifyIconW(NIM_MODIFY, &nid) }.as_bool()
+}
+
+/// Copies `text` into a fixed-size field as UTF-16, cut short to leave room
+/// for the terminating NUL.
+fn copy_text(field: &mut [u16], text: &str) {
+    let room = field.len() - 1;
+    let mut len = 0;
+    for (slot, unit) in field[..room].iter_mut().zip(text.encode_utf16()) {
+        *slot = unit;
+        len += 1;
+    }
+    field[len] = 0;
 }

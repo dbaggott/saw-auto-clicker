@@ -1,10 +1,11 @@
-//! What the tray shows (R14, R16), worked out from the core's reports.
+//! What the tray shows (R14, R16, R21), worked out from the core's reports.
 
 use saw_core::{Button, ButtonEvent, Direction, Hotkey, Settings, Source, Verdict};
 
 /// R16's message.
 pub const ELEVATED_MESSAGE: &str = "Clicking is unavailable over elevated (administrator) windows.";
 const HOTKEY_MISSING_MESSAGE: &str = "No hotkey is active; see Settings.";
+const NO_APPS_MESSAGE: &str = "No apps chosen; see Settings.";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TrayState {
@@ -15,6 +16,8 @@ pub struct TrayState {
     /// No toggle hotkey is registered, because the one in the settings was
     /// refused at startup (R15).
     pub hotkey_missing: bool,
+    /// No app is chosen to auto-click in, so none does (R21).
+    pub no_apps: bool,
 }
 
 /// Whether the settings name a hotkey that isn't registered, because it was
@@ -27,8 +30,11 @@ impl TrayState {
     pub fn tooltip(&self) -> String {
         let state = if self.enabled { "enabled" } else { "disabled" };
         let mut text = format!("saw-auto-clicker: {state}");
+        // With no apps chosen nothing clicks, elevated or not, and leaving
+        // R16's message out keeps the tooltip within the tray's limit.
         for (shown, message) in [
-            (self.elevated_warning, ELEVATED_MESSAGE),
+            (self.no_apps, NO_APPS_MESSAGE),
+            (self.elevated_warning && !self.no_apps, ELEVATED_MESSAGE),
             (self.hotkey_missing, HOTKEY_MISSING_MESSAGE),
         ] {
             if shown {
@@ -43,6 +49,20 @@ impl TrayState {
     pub fn toggle_label(&self) -> &'static str {
         if self.enabled { "Disable" } else { "Enable" }
     }
+}
+
+/// The notification shown when the app starts enabled, as its title and
+/// text, for a user who forgot it starts that way (R14). `apps` is how many
+/// apps are chosen to auto-click in (R21); none are named.
+pub fn started_enabled_notice(apps: usize) -> (&'static str, String) {
+    let text = match apps {
+        0 => "No apps are chosen yet, so it won't auto-click anywhere. \
+              Add them in Settings, from the tray icon."
+            .to_string(),
+        1 => "It auto-clicks in the 1 app you chose.".to_string(),
+        n => format!("It auto-clicks in the {n} apps you chose."),
+    };
+    ("saw-auto-clicker is running and enabled", text)
 }
 
 /// Spots, from the events the gate sees, the moment a burst starts: the
@@ -108,6 +128,20 @@ mod tests {
     }
 
     #[test]
+    fn with_no_apps_the_tooltip_says_so_in_place_of_r16s_message() {
+        let state = TrayState {
+            enabled: true,
+            elevated_warning: true,
+            hotkey_missing: true,
+            no_apps: true,
+        };
+        assert_eq!(
+            state.tooltip(),
+            format!("saw-auto-clicker: enabled\n{NO_APPS_MESSAGE}\n{HOTKEY_MISSING_MESSAGE}")
+        );
+    }
+
+    #[test]
     fn only_a_chosen_hotkey_that_isnt_registered_is_missing() {
         let hotkey = Hotkey {
             modifiers: Modifiers {
@@ -126,12 +160,32 @@ mod tests {
     #[test]
     fn the_tooltip_fits_the_tray_limit() {
         // A notification-area tooltip holds 127 characters plus the NUL.
-        let state = TrayState {
-            enabled: false,
-            elevated_warning: true,
-            hotkey_missing: true,
-        };
-        assert!(state.tooltip().encode_utf16().count() <= 127);
+        for no_apps in [false, true] {
+            let state = TrayState {
+                enabled: false,
+                elevated_warning: true,
+                hotkey_missing: true,
+                no_apps,
+            };
+            assert!(state.tooltip().encode_utf16().count() <= 127, "{no_apps}");
+        }
+    }
+
+    #[test]
+    fn the_started_enabled_notice_counts_the_apps_or_says_none_are_chosen() {
+        let (title, none) = started_enabled_notice(0);
+        assert!(none.contains("No apps are chosen") && none.contains("Settings"));
+        assert_eq!(
+            started_enabled_notice(1).1,
+            "It auto-clicks in the 1 app you chose."
+        );
+        assert_eq!(
+            started_enabled_notice(3).1,
+            "It auto-clicks in the 3 apps you chose."
+        );
+        // NOTIFYICONDATAW holds 63 characters of title and 255 of text.
+        assert!(title.encode_utf16().count() <= 63);
+        assert!(none.encode_utf16().count() <= 255);
     }
 
     #[test]

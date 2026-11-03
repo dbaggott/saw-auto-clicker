@@ -6,12 +6,12 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use crate::backend::{Inject, Observe};
+use crate::backend::{Inject, Observe, Target};
 use crate::clock::StdClock;
 use crate::gate::{Button, ButtonEvent, Direction, Source, Verdict};
 use crate::runtime::spawn;
 use crate::scheduler::Status;
-use crate::settings::{ClickButtons, Settings};
+use crate::settings::{Apps, ClickButtons, Settings};
 
 /// Injections go to the observing thread, as an OS echoes them to its hook.
 struct EchoingBackend {
@@ -29,8 +29,11 @@ impl Inject for EchoingBackend {
         self.hook.send(event).unwrap();
     }
 
-    fn can_inject_at_cursor(&mut self) -> bool {
-        true
+    fn target_at_cursor(&mut self) -> Target {
+        Target {
+            injectable: true,
+            app: Some("app.exe".into()),
+        }
     }
 }
 
@@ -43,6 +46,8 @@ fn a_hold_clicks_and_shutdown_returns() {
     let (hook, hook_events) = mpsc::channel::<ButtonEvent>();
     let statuses = Arc::new(Mutex::new(Vec::new()));
     let status_log = Arc::clone(&statuses);
+    let mut apps = Apps::default();
+    apps.add("app.exe").unwrap();
     let settings = Settings::new(
         50,
         Duration::from_millis(50),
@@ -50,7 +55,8 @@ fn a_hold_clicks_and_shutdown_returns() {
         ClickButtons::Both,
         None,
     )
-    .unwrap();
+    .unwrap()
+    .with_apps(apps);
     let (mut gate, handle) = spawn(
         EchoingBackend { hook: hook.clone() },
         Arc::new(StdClock::new()),

@@ -1,12 +1,13 @@
-//! The settings window (R1, R14, R15, Q8): an eframe window opened on demand
+//! The settings window (R1, R14, R15, R21, Q8): an eframe window opened on demand
 //! on the main thread. While it is open, eframe's event loop pumps the main
 //! thread's messages, so the tray keeps working; the window polls for tray
 //! clicks and the clicker's reports as the main loop does.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use eframe::egui;
-use saw_core::{BUTTERFLY_CPS, CPS_RANGE, ClickButtons, Hotkey, Key, Modifiers};
+use saw_core::{Apps, BUTTERFLY_CPS, CPS_RANGE, ClickButtons, Hotkey, Key, Modifiers};
 
 use crate::flight::ScreenRect;
 use crate::form::{self, Draft};
@@ -40,6 +41,16 @@ const DELAY_HELP: &str =
 const JITTER_HELP: &str = "Adds natural variation to the click rate.";
 const CLICKS_HELP: &str = "Which types of clicks auto-click when held down.";
 const HOTKEY_HELP: &str = "An optional keyboard shortcut that enables and disables auto-clicking.";
+const APPS_HELP: &str = "The apps that auto-click when a button is held in them. \
+Anywhere else, holding a button is an ordinary press or drag. An app is matched by its \
+program's file name, so it covers every program running under that name: adding a shared \
+runtime or host, such as a Java runtime or ApplicationFrameHost.exe, which shows many Store \
+apps' windows, turns on everything it runs.";
+const NO_APPS_NOTICE: &str =
+    "No apps are chosen, so auto-clicking is off everywhere until you add one under Apps.";
+/// The tallest the list of apps grows before it scrolls, so a long list
+/// never pushes the window off the screen.
+const APPS_LIST_HEIGHT: f32 = 132.0;
 const ENABLE_ON_STARTUP_HELP: &str = "Controls whether the auto-clicker is enabled \
 when the app starts, by default it starts disabled to prevent accidental auto-clicking.";
 
@@ -62,11 +73,7 @@ pub fn show(app: &mut App, close_after_frames: Option<u32>) -> Result<Closed, St
         .with_resizable(false)
         .with_minimize_button(false)
         .with_maximize_button(false)
-        .with_icon(egui::IconData {
-            rgba: icon::rgba(true),
-            width: icon::SIZE,
-            height: icon::SIZE,
-        });
+        .with_icon(window_icon(app.enabled()));
     let options = eframe::NativeOptions {
         viewport,
         centered: true,
@@ -79,6 +86,7 @@ pub fn show(app: &mut App, close_after_frames: Option<u32>) -> Result<Closed, St
     };
     let draft = Draft::from(&app.settings);
     let enable_on_startup = app.enable_on_startup;
+    let icon_enabled = app.enabled();
     let modifiers = draft.hotkey.map_or(
         // What a newly chosen key starts with.
         Modifiers {
@@ -95,13 +103,15 @@ pub fn show(app: &mut App, close_after_frames: Option<u32>) -> Result<Closed, St
             style(&cc.egui_ctx);
             Ok(Box::new(Window {
                 app,
+                saved: draft.clone(),
                 draft,
-                saved: draft,
                 hotkey_edited: None,
                 modifiers,
                 enable_on_startup,
                 hotkey_unusable: None,
                 flap_started: None,
+                icon_enabled,
+                running_apps: None,
                 closed: &mut closed,
                 requested_height: None,
                 frames: 0,
@@ -173,6 +183,10 @@ struct Window<'a> {
     /// it stays in effect.
     hotkey_unusable: Option<String>,
     flap_started: Option<f64>,
+    /// Whether the window's icon shows the enabled state.
+    icon_enabled: bool,
+    /// The apps the add control offers, read when it opens.
+    running_apps: Option<Vec<String>>,
     closed: &'a mut Closed,
     /// The height last asked of the window, so a size the OS won't grant is
     /// asked for once rather than every frame.
@@ -190,6 +204,11 @@ impl eframe::App for Window<'_> {
                 self.closed.next = Next::Quit;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
+        }
+        if self.icon_enabled != self.app.enabled() {
+            self.icon_enabled = self.app.enabled();
+            let icon = window_icon(self.icon_enabled);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Icon(Some(Arc::new(icon))));
         }
         let scale = ctx.pixels_per_point();
         if let Some(rect) = ctx.input(|i| i.viewport().outer_rect) {
@@ -238,7 +257,7 @@ impl eframe::App for Window<'_> {
     /// back.
     fn on_exit(&mut self) {
         if self.draft != self.saved || self.enable_on_startup != self.app.enable_on_startup {
-            self.save(self.draft);
+            self.save(self.draft.clone());
         }
     }
 }
@@ -280,6 +299,15 @@ impl Window<'_> {
                         d.buttons = choice;
                     }
                 }
+            });
+            ui.end_row();
+        });
+        ui.add_space(4.0);
+        card(ui, "Where it auto-clicks", |ui| {
+            setting(ui, "Apps", APPS_HELP);
+            ui.vertical(|ui| {
+                apps_list(ui, &mut d.apps);
+                add_app(ui, &mut d.apps, &mut self.running_apps);
             });
             ui.end_row();
         });
@@ -328,6 +356,9 @@ impl Window<'_> {
     fn notices(&mut self, ui: &mut egui::Ui) {
         let error = ui.visuals().error_fg_color;
         let warning = ui.visuals().warn_fg_color;
+        if self.draft.apps.is_empty() {
+            notice(ui, warning, NO_APPS_NOTICE);
+        }
         if let Some(problem) = &self.hotkey_unusable {
             notice(ui, error, problem);
         }
@@ -340,7 +371,7 @@ impl Window<'_> {
                 && ui.button("Try the hotkey again").clicked();
         }
         if retry {
-            self.save(self.saved);
+            self.save(self.saved.clone());
         }
         if let Some(problem) = &self.app.save_problem {
             notice(ui, error, problem);
@@ -354,7 +385,7 @@ impl Window<'_> {
     /// it is let go, not at every step of the drag, and a hotkey once its
     /// controls have settled.
     fn save_changes(&mut self, ctx: &egui::Context) {
-        let mut ready = self.draft;
+        let mut ready = self.draft.clone();
         if let Some(edited) = self.hotkey_edited {
             let waited = ctx.input(|i| i.time) - edited;
             if waited < HOTKEY_SETTLE {
@@ -398,11 +429,85 @@ impl Window<'_> {
                 self.app.settings.hotkey()
             }
         };
-        let requested = Draft { hotkey, ..draft }
-            .to_settings()
-            .expect("the controls keep every value in range");
+        let requested = Draft {
+            hotkey,
+            ..draft.clone()
+        }
+        .into_settings()
+        .expect("the controls keep every value in range");
         self.app.apply_settings(requested, self.enable_on_startup);
         self.saved = draft;
+    }
+}
+
+/// The chosen apps, each with a control that removes it, scrolling once
+/// there are more than fit.
+fn apps_list(ui: &mut egui::Ui, apps: &mut Apps) {
+    if apps.is_empty() {
+        return;
+    }
+    let mut removed = None;
+    egui::ScrollArea::vertical()
+        .max_height(APPS_LIST_HEIGHT)
+        .auto_shrink([false, true])
+        .show(ui, |ui| {
+            for name in apps.names() {
+                ui.horizontal(|ui| {
+                    ui.label(name);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.small_button("Remove").clicked() {
+                            removed = Some(name.clone());
+                        }
+                    });
+                });
+            }
+        });
+    if let Some(name) = removed {
+        apps.remove(&name);
+    }
+}
+
+/// A control offering the apps with a window open now that aren't chosen
+/// yet. `running` holds them while it is open, read once as it opens.
+fn add_app(ui: &mut egui::Ui, apps: &mut Apps, running: &mut Option<Vec<String>>) {
+    let menu = ui.menu_button("Add app…", |ui| {
+        let offered: Vec<&String> = running
+            .get_or_insert_with(saw_windows::running_apps)
+            .iter()
+            .filter(|name| !apps.contains(name))
+            .collect();
+        if offered.is_empty() {
+            ui.label(egui::RichText::new("No other app has a window open.").weak());
+            return None;
+        }
+        let mut chosen = None;
+        egui::ScrollArea::vertical()
+            .max_height(APPS_LIST_HEIGHT * 2.0)
+            .show(ui, |ui| {
+                for name in offered {
+                    if ui.button(name.as_str()).clicked() {
+                        chosen = Some(name.clone());
+                        ui.close();
+                    }
+                }
+            });
+        chosen
+    });
+    match menu.inner {
+        Some(Some(name)) => {
+            // Names read from Windows are file names, so always accepted.
+            let _ = apps.add(&name);
+        }
+        Some(None) => {}
+        None => *running = None,
+    }
+}
+
+fn window_icon(enabled: bool) -> egui::IconData {
+    egui::IconData {
+        rgba: icon::rgba(enabled),
+        width: icon::SIZE,
+        height: icon::SIZE,
     }
 }
 
