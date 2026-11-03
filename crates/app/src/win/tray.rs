@@ -6,8 +6,8 @@ use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuIt
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::Shell::{
-    NIF_GUID, NIF_INFO, NIF_TIP, NIIF_INFO, NIM_MODIFY, NOTIFY_ICON_DATA_FLAGS, NOTIFYICONDATAW,
-    Shell_NotifyIconW,
+    NIF_GUID, NIF_INFO, NIF_TIP, NIIF_INFO, NIM_DELETE, NIM_MODIFY, NOTIFY_ICON_DATA_FLAGS,
+    NOTIFY_ICON_MESSAGE, NOTIFYICONDATAW, Shell_NotifyIconW,
 };
 use windows::core::GUID;
 
@@ -85,6 +85,10 @@ impl Tray {
         // by the GUID shows whether it registered.
         let registered = match guid {
             Some(guid) => {
+                // An icon a crashed run left under this GUID would refuse the
+                // new one. No other running copy can hold it: the GUID is this
+                // path's, and one copy runs per session.
+                notify_icon(NIM_DELETE, guid, HWND::default(), NIF_GUID, |_| {});
                 let icon = build(Some(guid))?;
                 let tooltip = state.tooltip();
                 let ok = modify(&icon, guid, NIF_TIP, |nid| {
@@ -174,15 +178,26 @@ fn modify(
     flags: NOTIFY_ICON_DATA_FLAGS,
     fill: impl FnOnce(&mut NOTIFYICONDATAW),
 ) -> bool {
+    let window = HWND(icon.window_handle());
+    notify_icon(NIM_MODIFY, guid, window, flags, fill)
+}
+
+fn notify_icon(
+    message: NOTIFY_ICON_MESSAGE,
+    guid: u128,
+    window: HWND,
+    flags: NOTIFY_ICON_DATA_FLAGS,
+    fill: impl FnOnce(&mut NOTIFYICONDATAW),
+) -> bool {
     let mut nid = NOTIFYICONDATAW {
         cbSize: size_of::<NOTIFYICONDATAW>() as u32,
-        hWnd: HWND(icon.window_handle()),
+        hWnd: window,
         uFlags: flags | NIF_GUID,
         guidItem: GUID::from_u128(guid),
         ..NOTIFYICONDATAW::default()
     };
     fill(&mut nid);
-    unsafe { Shell_NotifyIconW(NIM_MODIFY, &nid) }.as_bool()
+    unsafe { Shell_NotifyIconW(message, &nid) }.as_bool()
 }
 
 /// Copies `text` into a fixed-size field as UTF-16, cut short to leave room
