@@ -5,7 +5,7 @@ use saw_core::{Button, ButtonEvent, Direction, Hotkey, Settings, Source, Verdict
 /// R16's message.
 pub const ELEVATED_MESSAGE: &str = "Clicking is unavailable over elevated (administrator) windows.";
 const HOTKEY_MISSING_MESSAGE: &str = "No hotkey is active; see Settings.";
-const NO_APPS_MESSAGE: &str = "No applications allowed; see Settings.";
+const NO_APPS_MESSAGE: &str = "Configure allowed applications in settings";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TrayState {
@@ -51,19 +51,9 @@ impl TrayState {
     }
 }
 
-/// The notification shown when the app starts enabled, as its title and
-/// text, for a user who forgot it starts that way (R14). `apps` is how many
-/// apps are chosen to auto-click in (R21); none are named.
-pub fn started_enabled_notice(apps: usize) -> (&'static str, String) {
-    let text = match apps {
-        0 => "No applications are allowed yet, so it won't auto-click anywhere. \
-              Add them in Settings, from the tray icon."
-            .to_string(),
-        1 => "It auto-clicks in the 1 allowed application.".to_string(),
-        n => format!("It auto-clicks in the {n} allowed applications."),
-    };
-    ("saw-auto-clicker is running and enabled", text)
-}
+/// The notification shown when the app starts enabled, for a user who forgot
+/// it starts that way (R14). It shows only then, so it always says enabled.
+pub const STARTED_ENABLED_NOTICE: &str = "SAW Auto-Clicker is running (currently enabled).";
 
 /// Spots, from the events the gate sees, the moment a burst starts: the
 /// first of the app's own injections to pass after a physical press. That
@@ -172,20 +162,9 @@ mod tests {
     }
 
     #[test]
-    fn the_started_enabled_notice_counts_the_apps_or_says_none_are_chosen() {
-        let (title, none) = started_enabled_notice(0);
-        assert!(none.contains("No applications are allowed") && none.contains("Settings"));
-        assert_eq!(
-            started_enabled_notice(1).1,
-            "It auto-clicks in the 1 allowed application."
-        );
-        assert_eq!(
-            started_enabled_notice(3).1,
-            "It auto-clicks in the 3 allowed applications."
-        );
-        // NOTIFYICONDATAW holds 63 characters of title and 255 of text.
-        assert!(title.encode_utf16().count() <= 63);
-        assert!(none.encode_utf16().count() <= 255);
+    fn the_started_enabled_notice_fits_the_notification() {
+        // NOTIFYICONDATAW holds 255 characters of text.
+        assert!(STARTED_ENABLED_NOTICE.encode_utf16().count() <= 255);
     }
 
     #[test]

@@ -18,7 +18,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 use crate::apply::apply;
 use crate::config;
-use crate::status::{BurstWatch, TrayState, hotkey_missing, started_enabled_notice};
+use crate::status::{BurstWatch, STARTED_ENABLED_NOTICE, TrayState, hotkey_missing};
 use crate::tray_guid;
 use crate::win::autostart::StartAtLogin;
 use crate::win::fly_to_tray;
@@ -181,10 +181,9 @@ impl App {
         }
         if loaded.first_run || loaded.enable_on_startup || persist == Persist::No {
             app.clicker().controller().set_enabled(true);
-            let (title, text) = started_enabled_notice(app.settings.apps().len());
             // A notification Windows refuses costs only the reminder, and
             // there is no log to record it in.
-            let _ = app.tray.notify(title, &text);
+            let _ = app.tray.notify(STARTED_ENABLED_NOTICE);
         }
         Ok(app)
     }

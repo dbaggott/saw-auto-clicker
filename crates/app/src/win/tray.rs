@@ -114,12 +114,11 @@ impl Tray {
         })
     }
 
-    /// Shows a Windows notification from the icon, if it has a GUID, and
-    /// says whether Windows took it.
-    pub fn notify(&self, title: &str, text: &str) -> bool {
+    /// Shows a Windows notification of `text`, with no title, from the icon,
+    /// if it has a GUID, and says whether Windows took it.
+    pub fn notify(&self, text: &str) -> bool {
         self.guid.is_some_and(|guid| {
             modify(&self.icon, guid, NIF_INFO, |nid| {
-                copy_text(&mut nid.szInfoTitle, title);
                 copy_text(&mut nid.szInfo, text);
                 nid.dwInfoFlags = NIIF_INFO;
             })

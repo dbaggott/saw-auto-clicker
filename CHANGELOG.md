@@ -8,7 +8,7 @@ Each release's notes are its section here. CI fails when the workspace version i
 - After upgrading, no applications are allowed, so the app auto-clicks nowhere until you add one. The settings window and the tray icon's tooltip say so while none are allowed.
 - The settings window has an Enabled switch, which shows and changes the same state as the tray menu and the hotkey.
 - A new install now has Enable on startup on. An upgraded install keeps its setting.
-- When the app starts enabled, a Windows notification says so, and how many applications it auto-clicks in.
+- When the app starts enabled, a Windows notification says so.
 - The settings window's taskbar icon now shows whether the app is enabled, as the tray icon does.
 - Windows forgets once whether you had the tray icon shown on the taskbar or in the overflow area; set it again if you had moved it.
 

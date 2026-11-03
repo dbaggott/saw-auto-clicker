@@ -53,6 +53,9 @@ hotkey do.";
 /// never pushes the window off the screen. Four and a half rows, so a cut-off
 /// row shows there is more.
 const APPS_LIST_HEIGHT: f32 = 146.0;
+/// How far below the list's top edge its first entry's text sits: its frame's
+/// stroke and each row's top margin.
+const LIST_ROW_TOP: f32 = 4.0;
 const ENABLE_ON_STARTUP_HELP: &str = "Controls whether the auto-clicker is enabled \
 when the app starts. It is on for a new install, since it only auto-clicks in allowed \
 applications.";
@@ -324,7 +327,14 @@ impl Window<'_> {
         });
         ui.add_space(4.0);
         card(ui, "Applications", |ui| {
-            setting(ui, "Allowed for", ALLOWED_HELP);
+            // At the top of its cell, level with the list's first entry or
+            // the add control, rather than centred on a list that may be tall.
+            ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                if !d.apps.is_empty() {
+                    ui.add_space(LIST_ROW_TOP);
+                }
+                setting(ui, "Allowed for", ALLOWED_HELP);
+            });
             ui.vertical(|ui| {
                 apps_list(ui, &mut d.apps);
                 add_app(ui, &mut d.apps, &mut self.running_apps);
