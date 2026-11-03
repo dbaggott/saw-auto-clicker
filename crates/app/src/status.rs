@@ -3,8 +3,8 @@
 use saw_core::{Button, ButtonEvent, Direction, Hotkey, Settings, Source, Verdict};
 
 /// R16's message.
-pub const ELEVATED_MESSAGE: &str = "Clicking is unavailable over elevated (administrator) windows.";
-const HOTKEY_MISSING_MESSAGE: &str = "No hotkey is active; see Settings.";
+pub const ELEVATED_MESSAGE: &str = "Can't click into administrator windows.";
+const HOTKEY_MISSING_MESSAGE: &str = "Configured hotkey could not be used due to conflict.";
 const NO_APPS_MESSAGE: &str = "Configure allowed applications in settings.";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

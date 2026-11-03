@@ -22,8 +22,8 @@
 
 ; The name the installer, Settings > Apps and the Start menu show.
 #define AppName "SAW Auto-Clicker"
-; The install folder's and Start-menu shortcut's names, which keep the
-; earlier name so an upgrade lands in place and replaces its own shortcut.
+; The install folder's name, which keeps the earlier name so an upgrade
+; lands in place.
 #define AppDirName "saw-auto-clicker"
 ; A stable name, so an upgrade replaces the exe in place and the start-at-login
 ; value keeps pointing at it.
@@ -73,8 +73,13 @@ Name: startatlogin; Description: "Start at login"; Flags: unchecked
 Source: "{#AppExeX64}"; DestDir: "{app}"; DestName: "{#AppExeName}"; Check: not IsArm64; Flags: ignoreversion
 Source: "{#AppExeArm64}"; DestDir: "{app}"; DestName: "{#AppExeName}"; Check: IsArm64; Flags: ignoreversion
 
+[InstallDelete]
+; The shortcut versions before 2.0.0 created, named before the app took its
+; display name, so an upgrade leaves one shortcut, not two.
+Type: files; Name: "{autoprograms}\saw-auto-clicker.lnk"
+
 [Icons]
-Name: "{autoprograms}\{#AppDirName}"; Filename: "{app}\{#AppExeName}"
+Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"
 
 [Registry]
 ; The same string the app writes (crates/app/src/win/autostart.rs), so its tray

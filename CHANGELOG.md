@@ -10,7 +10,7 @@ Each release's notes are its section here. CI fails when the workspace version i
 - A new install now has Enable on startup on. An upgraded install keeps its setting.
 - When the app starts enabled, a Windows notification says so.
 - The settings window's taskbar icon now shows whether the app is enabled, as the tray icon does.
-- The app calls itself SAW Auto-Clicker in its tray tooltip, settings window, messages, and the installer and Settings > Apps. Its install folder and Start menu shortcut keep their names.
+- The app calls itself SAW Auto-Clicker in its tray tooltip, settings window, messages, and the installer and Settings > Apps. The Start menu shortcut is renamed to match, and its install folder keeps its name.
 - Windows forgets once whether you had the tray icon shown on the taskbar or in the overflow area; set it again if you had moved it.
 
 ## v1.0.0
