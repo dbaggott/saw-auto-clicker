@@ -1,16 +1,19 @@
 //! The apps a user can choose to auto-click in (R21): which executable a
 //! window belongs to, and which apps have a window open.
 
-/// `names` with duplicates that differ only in case dropped, sorted ignoring
+use saw_core::Apps;
+
+/// `names` with duplicates dropped as [`Apps`] drops them, sorted ignoring
 /// case.
 pub(crate) fn distinct_sorted(names: impl IntoIterator<Item = String>) -> Vec<String> {
-    let mut keyed: Vec<(String, String)> = names
-        .into_iter()
-        .map(|name| (name.to_lowercase(), name))
-        .collect();
-    keyed.sort();
-    keyed.dedup_by(|a, b| a.0 == b.0);
-    keyed.into_iter().map(|(_, name)| name).collect()
+    let mut apps = Apps::default();
+    for name in names {
+        // A file name read from Windows is never empty or a path.
+        let _ = apps.add(&name);
+    }
+    let mut names = apps.names().to_vec();
+    names.sort_by_cached_key(|name| (name.to_lowercase(), name.clone()));
+    names
 }
 
 #[cfg(windows)]
@@ -25,7 +28,7 @@ mod win {
     use std::os::windows::ffi::OsStringExt;
     use std::path::PathBuf;
 
-    use windows::Win32::Foundation::{HANDLE, HWND, LPARAM};
+    use windows::Win32::Foundation::{ERROR_INSUFFICIENT_BUFFER, HANDLE, HWND, LPARAM};
     use windows::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute};
     use windows::Win32::System::Threading::{
         GetCurrentProcessId, OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -56,18 +59,38 @@ mod win {
     /// The file name of the executable `process` runs, such as `app.exe`.
     /// `process` needs `PROCESS_QUERY_LIMITED_INFORMATION`.
     pub(crate) fn executable_name(process: HANDLE) -> io::Result<String> {
-        // Long enough for any path Windows allows.
-        let mut buf = vec![0u16; 32_768];
-        let mut len = buf.len() as u32;
-        unsafe {
+        // MAX_PATH covers nearly every executable, and this runs before each
+        // injected up, so the longest path Windows allows is only tried for
+        // a path that didn't fit.
+        let mut path = [0u16; 260];
+        let mut len = path.len() as u32;
+        let read = unsafe {
             QueryFullProcessImageNameW(
                 process,
                 PROCESS_NAME_WIN32,
-                PWSTR(buf.as_mut_ptr()),
+                PWSTR(path.as_mut_ptr()),
                 &mut len,
-            )?;
-        }
-        let path = PathBuf::from(OsString::from_wide(&buf[..len as usize]));
+            )
+        };
+        let path = match read {
+            Ok(()) => path[..len as usize].to_vec(),
+            Err(e) if e.code() != ERROR_INSUFFICIENT_BUFFER.to_hresult() => return Err(e.into()),
+            Err(_) => {
+                let mut long = vec![0u16; 32_768];
+                let mut len = long.len() as u32;
+                unsafe {
+                    QueryFullProcessImageNameW(
+                        process,
+                        PROCESS_NAME_WIN32,
+                        PWSTR(long.as_mut_ptr()),
+                        &mut len,
+                    )?;
+                }
+                long.truncate(len as usize);
+                long
+            }
+        };
+        let path = PathBuf::from(OsString::from_wide(&path));
         path.file_name()
             .and_then(|name| name.to_str())
             .map(str::to_string)

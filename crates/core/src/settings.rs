@@ -114,10 +114,11 @@ impl Default for Settings {
 pub struct Apps(Vec<String>);
 
 impl Apps {
-    /// Adds `name` unless the list already holds it in any case, and says
-    /// whether it did.
+    /// Adds `name`, without surrounding whitespace, unless the list already
+    /// holds it in any case, and says whether it did.
     pub fn add(&mut self, name: &str) -> Result<bool, AppNameError> {
-        if name.trim().is_empty() {
+        let name = name.trim();
+        if name.is_empty() {
             return Err(AppNameError::Empty);
         }
         if name.contains(['/', '\\']) {
@@ -331,7 +332,10 @@ mod tests {
         assert_eq!(apps.add("ÉCLAIR.EXE"), Ok(true));
         assert_eq!(apps.add("spiel.EXE"), Ok(false));
         assert_eq!(apps.add("éclair.exe"), Ok(false));
-        assert_eq!(apps.names(), ["Spiel.exe", "ÉCLAIR.EXE"]);
+        assert_eq!(apps.add(" spiel.exe\t"), Ok(false));
+        assert_eq!(apps.add(" other.exe "), Ok(true));
+        assert_eq!(apps.names(), ["Spiel.exe", "ÉCLAIR.EXE", "other.exe"]);
+        apps.remove("other.exe");
         assert!(apps.contains("SPIEL.exe") && apps.contains("Éclair.exe"));
         assert!(!apps.contains("spiel") && !apps.contains("other.exe"));
         apps.remove("éclair.EXE");

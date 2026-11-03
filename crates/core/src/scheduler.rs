@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use fastrand::Rng;
 
-use crate::backend::{Inject, Observe, Target};
+use crate::backend::{Inject, Observe};
 use crate::clock::{Clock, Time};
 use crate::gate::{Button, ButtonEvent, Direction, Source};
 use crate::jitter::{Cycle, Grid, HUMAN_JITTER, MIN_PHASE, RATE_SPREAD, Rate};
@@ -332,9 +332,7 @@ impl<B: Observe + Inject> Scheduler<B> {
                 // The current settings' apps, not the press's: removing an
                 // app stops it bursting from then on, as the check before
                 // each up does.
-                if let Some(refusal) =
-                    refusal(&self.backend.target_at_cursor(), self.settings.apps())
-                {
+                if let Some(refusal) = refusal(&mut self.backend, self.settings.apps()) {
                     *track = Track::Held;
                     refusal.report(button, &mut self.on_status);
                     return None;
@@ -354,8 +352,7 @@ impl<B: Observe + Inject> Scheduler<B> {
                     return Some(due);
                 }
                 if burst.next == Direction::Up
-                    && let Some(refusal) =
-                        refusal(&self.backend.target_at_cursor(), self.settings.apps())
+                    && let Some(refusal) = refusal(&mut self.backend, self.settings.apps())
                 {
                     // The last injection was a down, so the physical up ends
                     // the burst cleanly.
@@ -428,7 +425,13 @@ impl Refusal {
     }
 }
 
-fn refusal(target: &Target, apps: &Apps) -> Option<Refusal> {
+/// Reads the target only when some app is chosen: with none, the answer
+/// can't depend on it.
+fn refusal(backend: &mut impl Inject, apps: &Apps) -> Option<Refusal> {
+    if apps.is_empty() {
+        return Some(Refusal::NotChosen);
+    }
+    let target = backend.target_at_cursor();
     if !target.app.as_deref().is_some_and(|app| apps.contains(app)) {
         Some(Refusal::NotChosen)
     } else if !target.injectable {

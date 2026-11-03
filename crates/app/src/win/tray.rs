@@ -89,12 +89,13 @@ impl Tray {
                 // new one. No other running copy can hold it: the GUID is this
                 // path's, and one copy runs per session.
                 notify_icon(NIM_DELETE, guid, HWND::default(), NIF_GUID, |_| {});
-                let icon = build(Some(guid))?;
                 let tooltip = state.tooltip();
-                let ok = modify(&icon, guid, NIF_TIP, |nid| {
-                    copy_text(&mut nid.szTip, &tooltip)
-                });
-                ok.then_some((icon, Some(guid)))
+                build(Some(guid)).ok().and_then(|icon| {
+                    let ok = modify(&icon, guid, NIF_TIP, |nid| {
+                        copy_text(&mut nid.szTip, &tooltip)
+                    });
+                    ok.then_some((icon, Some(guid)))
+                })
             }
             None => None,
         };
