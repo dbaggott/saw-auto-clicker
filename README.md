@@ -2,7 +2,9 @@
 
 My kiddo complained to me that the auto-clickers he was finding were from "shady ass websites" that he didn't trust.  He asked me to make one for him and so it was that the SAW auto-clicker was born.  SAW stands for Shady Azz Website and the full experience is at https://shadyazzwebsite.dnbg.app 
 
-It works according to his specifications -- it can be enabled or disabled with a configurable hot key.  When enabled, holding the mouse button for longer than the configurable delay causes the mouse to start auto-clicking at the target clicks per second (also configurable).  It probably works for trackpad-based clicking but that hasn't been tested on anything other than a Windows running in a VM on MacOS.
+It works according to his specifications -- it can be enabled or disabled with a configurable hot key. When enabled, holding the mouse button for longer than the configurable delay causes the mouse to start auto-clicking at the target clicks per second (also configurable). It includes optional jitter to provide some natural variation to the clicking (target speed and click spacing). After some use in the field, we added an allow list so that it only functions in allowed applications and doesn't accidentally wreak havoc somewhere else if you forget to disable it.
+
+It probably works for trackpad-based clicking but that hasn't been tested on anything other than a Windows running in a VM on MacOS.
 
 The auto-clicker runs on Windows-only currently.  Open an issue if you want it on another OS.
 
