@@ -45,8 +45,8 @@ const CLICKS_HELP: &str = "Which types of clicks auto-click when held down.";
 const HOTKEY_HELP: &str = "An optional keyboard shortcut that enables and disables auto-clicking.";
 const ALLOWED_HELP: &str = "To prevent unintended auto-clicking, the auto-clicker only works \
 in allowed applications. In order to add an application, it must be running.";
-const NO_APPS_NOTICE: &str = "No applications are allowed, so auto-clicking is off everywhere \
-until you add one under Applications.";
+const NO_APPS_NOTICE: &str = "Configure your first allowed application above (currently \
+auto-clicking is not allowed for any application).";
 const ENABLED_HELP: &str = "Turns auto-clicking on or off, as the tray menu and the toggle \
 hotkey do.";
 /// The tallest the list of apps grows before it scrolls, so a long list
@@ -56,9 +56,8 @@ const APPS_LIST_HEIGHT: f32 = 146.0;
 /// How far below the list's top edge its first entry's text sits: its frame's
 /// stroke and each row's top margin.
 const LIST_ROW_TOP: f32 = 4.0;
-const ENABLE_ON_STARTUP_HELP: &str = "Controls whether the auto-clicker is enabled \
-when the app starts. It is on for a new install, since it only auto-clicks in allowed \
-applications.";
+const ENABLE_ON_STARTUP_HELP: &str =
+    "Controls whether the auto-clicker is enabled when the app starts.";
 
 /// How the window closed.
 pub struct Closed {
