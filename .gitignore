@@ -1,2 +1,5 @@
 /target
 .worktrees/
+
+# JetBrains IDEs
+.idea/
